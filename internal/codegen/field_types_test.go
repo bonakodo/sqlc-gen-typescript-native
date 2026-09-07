@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // TestFieldNamesAcrossDrivers checks arguments, rows, and catalog models together.
@@ -19,13 +19,13 @@ func TestFieldNamesAcrossDrivers(t *testing.T) {
 			req := compatibilityRequest(opts.Options{Runtime: "deno", Driver: driver})
 			query := req.Queries[0]
 			query.Params[0].Column.Name = "authorID"
-			query.Columns = []*plugin.Column{
-				{Name: "firstName", Type: &plugin.Identifier{Name: "text"}, NotNull: true},
-				{Name: "first_name", Type: &plugin.Identifier{Name: "text"}, NotNull: true},
-				{Name: "LAST_NAME", Type: &plugin.Identifier{Name: "text"}, NotNull: true},
+			query.Columns = []*protocol.Column{
+				{Name: "firstName", Type: &protocol.Identifier{Name: "text"}, NotNull: true},
+				{Name: "first_name", Type: &protocol.Identifier{Name: "text"}, NotNull: true},
+				{Name: "LAST_NAME", Type: &protocol.Identifier{Name: "text"}, NotNull: true},
 			}
-			req.Catalog.Schemas = []*plugin.Schema{{Name: "public", Tables: []*plugin.Table{{
-				Rel: &plugin.Identifier{Name: "authors"}, Columns: query.Columns,
+			req.Catalog.Schemas = []*protocol.Schema{{Name: "public", Tables: []*protocol.Table{{
+				Rel: &protocol.Identifier{Name: "authors"}, Columns: query.Columns,
 			}}}}
 			response, err := Generate(context.Background(), req)
 			if err != nil {
@@ -57,9 +57,9 @@ func TestSQLiteTextAffinity(t *testing.T) {
 			t.Run(driver+"/"+declaration, func(t *testing.T) {
 				req := compatibilityRequest(opts.Options{Runtime: "deno", Driver: driver})
 				query := req.Queries[0]
-				column := &plugin.Column{Name: "displayName", Type: &plugin.Identifier{Name: declaration}}
+				column := &protocol.Column{Name: "displayName", Type: &protocol.Identifier{Name: declaration}}
 				query.Params[0].Column = column
-				query.Columns = []*plugin.Column{column}
+				query.Columns = []*protocol.Column{column}
 				source := compatibilitySource(t, req)
 				if strings.Count(source, "displayName: string | null;") != 2 {
 					t.Fatalf("text arguments and results must use string:\n%s", source)

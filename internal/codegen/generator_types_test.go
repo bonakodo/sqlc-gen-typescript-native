@@ -8,12 +8,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
-	"google.golang.org/protobuf/proto"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // typesTestRequest creates an isolated SQLite catalog for generator type tests.
-func typesTestRequest(options opts.Options) *plugin.GenerateRequest {
+func typesTestRequest(options opts.Options) *protocol.GenerateRequest {
 	if options.Runtime == "" {
 		options.Runtime = "deno"
 	}
@@ -27,15 +26,15 @@ func typesTestRequest(options opts.Options) *plugin.GenerateRequest {
 	if err != nil {
 		panic(err)
 	}
-	return &plugin.GenerateRequest{
-		Settings: &plugin.Settings{Engine: "sqlite"},
-		Catalog: &plugin.Catalog{
+	return &protocol.GenerateRequest{
+		Settings: &protocol.Settings{Engine: "sqlite"},
+		Catalog: &protocol.Catalog{
 			DefaultSchema: "main",
-			Schemas: []*plugin.Schema{{Name: "main", Tables: []*plugin.Table{{
-				Rel: &plugin.Identifier{Name: "users"},
-				Columns: []*plugin.Column{
-					{Name: "id", NotNull: true, Type: &plugin.Identifier{Name: "INTEGER"}},
-					{Name: "created_at", Type: &plugin.Identifier{Name: "INTEGER"}},
+			Schemas: []*protocol.Schema{{Name: "main", Tables: []*protocol.Table{{
+				Rel: &protocol.Identifier{Name: "users"},
+				Columns: []*protocol.Column{
+					{Name: "id", NotNull: true, Type: &protocol.Identifier{Name: "INTEGER"}},
+					{Name: "created_at", Type: &protocol.Identifier{Name: "INTEGER"}},
 				},
 			}}}},
 		},
@@ -44,7 +43,7 @@ func typesTestRequest(options opts.Options) *plugin.GenerateRequest {
 }
 
 // typesTestFile returns a generated module, failing if generation omitted it.
-func typesTestFile(t *testing.T, response *plugin.GenerateResponse, name string) string {
+func typesTestFile(t *testing.T, response *protocol.GenerateResponse, name string) string {
 	t.Helper()
 	for _, file := range response.Files {
 		if file.Name == name {
@@ -64,9 +63,9 @@ func TestColumnOverrideOriginalName(t *testing.T) {
 			{Column: "users.created_*", TSType: "Date"},
 		}},
 	}
-	column := &plugin.Column{
+	column := &protocol.Column{
 		Name: "createdAtAlias", OriginalName: "created_at",
-		Table: &plugin.Identifier{Name: "users"}, Type: &plugin.Identifier{Name: "INTEGER"},
+		Table: &protocol.Identifier{Name: "users"}, Type: &protocol.Identifier{Name: "INTEGER"},
 	}
 	if got := g.columnOverride(column); got == nil || got.TSType != "Date" {
 		t.Fatalf("alias column override = %v", got)
@@ -86,7 +85,7 @@ func TestDatabaseOverrideNullability(t *testing.T) {
 			{DBType: "integer", TSType: "OptionalID", Nullable: true},
 		}},
 	}
-	column := &plugin.Column{Type: &plugin.Identifier{Name: "INTEGER"}}
+	column := &protocol.Column{Type: &protocol.Identifier{Name: "INTEGER"}}
 	if got := g.columnOverride(column); got == nil || got.TSType != "OptionalID" {
 		t.Fatalf("nullable override = %v", got)
 	}
@@ -135,9 +134,9 @@ func TestTypesOnlyEmbedImports(t *testing.T) {
 	req := typesTestRequest(opts.Options{TypesOnly: true, Overrides: []opts.Override{{
 		Column: "users.id", TSType: "UserID", Import: &opts.Import{Path: "./types.ts", Name: "UserID"},
 	}}})
-	req.Queries = []*plugin.Query{{
+	req.Queries = []*protocol.Query{{
 		Name: "GetUser", Cmd: ":one", Filename: "nested/users.sql", Text: "SELECT users.id, users.created_at FROM users",
-		Columns: []*plugin.Column{{Name: "user", NotNull: true, EmbedTable: &plugin.Identifier{Name: "users"}}},
+		Columns: []*protocol.Column{{Name: "user", NotNull: true, EmbedTable: &protocol.Identifier{Name: "users"}}},
 	}}
 	response, err := Generate(context.Background(), req)
 	if err != nil {
@@ -177,9 +176,9 @@ func TestCodecImportsAvoidFunctionLocals(t *testing.T) {
 			req := typesTestRequest(opts.Options{Overrides: []opts.Override{{
 				Column: "users.created_at", TSType: "Date", Codec: &opts.Import{Path: "./codecs.ts", Name: codec},
 			}}})
-			req.Queries = []*plugin.Query{{
+			req.Queries = []*protocol.Query{{
 				Name: "GetDate", Cmd: ":one", Filename: "date.sql", Text: "SELECT created_at FROM users",
-				Columns: []*plugin.Column{{Name: "created_at", Type: &plugin.Identifier{Name: "INTEGER"}, Table: &plugin.Identifier{Name: "users"}}},
+				Columns: []*protocol.Column{{Name: "created_at", Type: &protocol.Identifier{Name: "INTEGER"}, Table: &protocol.Identifier{Name: "users"}}},
 			}}
 			response, err := Generate(context.Background(), req)
 			if err != nil {
@@ -212,7 +211,7 @@ func TestTypeNullAndSliceWrapping(t *testing.T) {
 // TestGenerationPreservesRequestAndOrder checks owned catalog copies and stability.
 func TestGenerationPreservesRequestAndOrder(t *testing.T) {
 	req := typesTestRequest(opts.Options{TypesOnly: true})
-	before := proto.Clone(req)
+	before := req.Clone()
 	first, err := Generate(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -221,10 +220,10 @@ func TestGenerationPreservesRequestAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !proto.Equal(first, second) {
+	if !wireEqual(first, second) {
 		t.Fatal("repeated generation changed the output")
 	}
-	if !proto.Equal(req, before) {
+	if !wireEqual(req, before) {
 		t.Fatal("generation changed the caller's request")
 	}
 }
@@ -245,7 +244,7 @@ func TestQueryFilenameURLCharacters(t *testing.T) {
 // same-named table model in the shared public index.
 func TestIndexNamespacePreservesModel(t *testing.T) {
 	req := typesTestRequest(opts.Options{})
-	req.Queries = []*plugin.Query{{Name: "DeleteUsers", Cmd: ":exec", Filename: "user.sql", Text: "DELETE FROM users"}}
+	req.Queries = []*protocol.Query{{Name: "DeleteUsers", Cmd: ":exec", Filename: "user.sql", Text: "DELETE FROM users"}}
 	response, err := Generate(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -259,10 +258,10 @@ func TestIndexNamespacePreservesModel(t *testing.T) {
 // TestInvalidParameterMetadata rejects malformed direct requests before sorting
 // or emitting an unused argument that would fail strict TypeScript checks.
 func TestInvalidParameterMetadata(t *testing.T) {
-	valid := &plugin.Parameter{Number: 1, Column: &plugin.Column{Name: "id"}}
-	for _, params := range [][]*plugin.Parameter{{nil}, {valid, nil}, {valid}} {
+	valid := &protocol.Parameter{Number: 1, Column: &protocol.Column{Name: "id"}}
+	for _, params := range [][]*protocol.Parameter{{nil}, {valid, nil}, {valid}} {
 		req := typesTestRequest(opts.Options{})
-		req.Queries = []*plugin.Query{{
+		req.Queries = []*protocol.Query{{
 			Name: "DeleteUsers", Cmd: ":exec", Filename: "users.sql",
 			Text: "DELETE FROM users", Params: params,
 		}}
@@ -337,30 +336,30 @@ func FuzzGenerateDeterministic(f *testing.F) {
 		table := req.Catalog.Schemas[0].Tables[0]
 		table.Rel.Name = tableName
 		table.Comment = comment
-		table.Columns = []*plugin.Column{
-			{Name: columnName, Comment: comment, Type: &plugin.Identifier{Name: "TEXT"}},
-			{Name: columnName, Comment: comment, Type: &plugin.Identifier{Name: "TEXT"}},
+		table.Columns = []*protocol.Column{
+			{Name: columnName, Comment: comment, Type: &protocol.Identifier{Name: "TEXT"}},
+			{Name: columnName, Comment: comment, Type: &protocol.Identifier{Name: "TEXT"}},
 		}
 		for _, filename := range []string{"query.sql", "nested/query.sql"} {
-			req.Queries = append(req.Queries, &plugin.Query{
+			req.Queries = append(req.Queries, &protocol.Query{
 				Name: queryName, Cmd: ":one", Filename: filename,
 				Text: "SELECT 1, 2", Comments: []string{comment},
-				Columns: []*plugin.Column{
-					{Name: columnName, Comment: comment, Type: &plugin.Identifier{Name: "TEXT"}},
-					{Name: columnName, Comment: comment, Type: &plugin.Identifier{Name: "TEXT"}},
+				Columns: []*protocol.Column{
+					{Name: columnName, Comment: comment, Type: &protocol.Identifier{Name: "TEXT"}},
+					{Name: columnName, Comment: comment, Type: &protocol.Identifier{Name: "TEXT"}},
 				},
 			})
 		}
-		before := proto.Clone(req)
+		before := req.Clone()
 		first, firstErr := Generate(context.Background(), req)
 		second, secondErr := Generate(context.Background(), req)
-		if !proto.Equal(req, before) {
+		if !wireEqual(req, before) {
 			t.Fatal("generation changed the compiler request")
 		}
 		if (firstErr == nil) != (secondErr == nil) || firstErr != nil && firstErr.Error() != secondErr.Error() {
 			t.Fatalf("generation returned inconsistent errors: %v, %v", firstErr, secondErr)
 		}
-		if !proto.Equal(first, second) {
+		if !wireEqual(first, second) {
 			t.Fatal("generation returned different files for the same request")
 		}
 		if firstErr != nil {

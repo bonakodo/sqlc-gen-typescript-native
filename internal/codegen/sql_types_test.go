@@ -5,15 +5,15 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // driverTypeModule resolves types in isolation from SQL and query emission.
 func driverTypeModule(driver, engine string) *module {
 	g := &generator{
-		request: &plugin.GenerateRequest{
-			Settings: &plugin.Settings{Engine: engine},
-			Catalog:  &plugin.Catalog{DefaultSchema: "public"},
+		request: &protocol.GenerateRequest{
+			Settings: &protocol.Settings{Engine: engine},
+			Catalog:  &protocol.Catalog{DefaultSchema: "public"},
 		},
 		options: opts.Options{Runtime: "deno", Driver: driver},
 	}
@@ -58,7 +58,7 @@ func TestDriverScalarTypes(t *testing.T) {
 	} {
 		t.Run(test.driver+"/"+test.sql, func(t *testing.T) {
 			m := driverTypeModule(test.driver, test.engine)
-			value, err := m.resolveType(&plugin.Column{Name: "value", Type: &plugin.Identifier{Name: test.sql}, NotNull: true}, false)
+			value, err := m.resolveType(&protocol.Column{Name: "value", Type: &protocol.Identifier{Name: test.sql}, NotNull: true}, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +85,7 @@ func TestMySQLBigNumberTypes(t *testing.T) {
 	} {
 		m := driverTypeModule("mysql2", "mysql")
 		m.gen.options.MySQL2 = test.options
-		kind, typ := m.mysqlType(&plugin.Column{Type: &plugin.Identifier{Name: "bigint"}})
+		kind, typ := m.mysqlType(&protocol.Column{Type: &protocol.Identifier{Name: "bigint"}})
 		if kind != test.kind || typ != test.typ {
 			t.Errorf("%+v: got %s / %s, want %s / %s", test.options, kind, typ, test.kind, test.typ)
 		}
@@ -97,7 +97,7 @@ func TestMySQLBigNumberTypes(t *testing.T) {
 func TestPostgresArrayTypes(t *testing.T) {
 	for _, driver := range []string{"pg", "postgres"} {
 		m := driverTypeModule(driver, "postgresql")
-		value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "int8"}, IsArray: true, ArrayDims: 2}, false)
+		value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "int8"}, IsArray: true, ArrayDims: 2}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,11 +111,11 @@ func TestPostgresArrayTypes(t *testing.T) {
 		if got := m.typeText(value); got != "ReadonlyArray<ReadonlyArray<string | undefined> | undefined> | undefined" {
 			t.Fatalf("undefined array type = %q", got)
 		}
-		_, err = m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "int4"}, IsSqlcSlice: true, NotNull: true}, false)
+		_, err = m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "int4"}, IsSqlcSlice: true, NotNull: true}, false)
 		if err == nil || !strings.Contains(err.Error(), "ANY($1::type[])") {
 			t.Fatalf("PostgreSQL sqlc.slice requires an actionable error, got %v", err)
 		}
-		value, err = m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "numeric"}, IsArray: true, NotNull: true}, false)
+		value, err = m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "numeric"}, IsArray: true, NotNull: true}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,21 +132,21 @@ func TestPostgresArrayTypes(t *testing.T) {
 // TestCatalogEnumTypes checks shared schema-qualified aliases and enum arrays.
 func TestCatalogEnumTypes(t *testing.T) {
 	m := driverTypeModule("pg", "postgresql")
-	m.gen.request.Catalog.Schemas = []*plugin.Schema{
-		{Name: "public", Enums: []*plugin.Enum{{Name: "state", Vals: []string{"open", "has\"quote", "open"}}}},
-		{Name: "archive", Enums: []*plugin.Enum{{Name: "state", Vals: []string{"closed"}}}},
+	m.gen.request.Catalog.Schemas = []*protocol.Schema{
+		{Name: "public", Enums: []*protocol.Enum{{Name: "state", Vals: []string{"open", "has\"quote", "open"}}}},
+		{Name: "archive", Enums: []*protocol.Enum{{Name: "state", Vals: []string{"closed"}}}},
 	}
 	if err := m.gen.buildEnums(); err != nil {
 		t.Fatal(err)
 	}
-	value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "state"}, NotNull: true, IsArray: true}, false)
+	value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "state"}, NotNull: true, IsArray: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := m.typeText(value); got != `ReadonlyArray<_sqlcImportState | null>` {
 		t.Fatalf("enum array type = %q", got)
 	}
-	value, err = m.resolveType(&plugin.Column{Type: &plugin.Identifier{Schema: "archive", Name: "state"}, NotNull: true}, false)
+	value, err = m.resolveType(&protocol.Column{Type: &protocol.Identifier{Schema: "archive", Name: "state"}, NotNull: true}, false)
 	if err != nil || value.typeName != `_sqlcImportArchiveState` {
 		t.Fatalf("schema-qualified enum = %+v, %v", value, err)
 	}
@@ -157,7 +157,7 @@ func TestCatalogEnumTypes(t *testing.T) {
 func TestDriverTypeImports(t *testing.T) {
 	m := driverTypeModule("pg", "postgresql")
 	m.names["Buffer"] = true
-	value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "bytea"}, NotNull: true}, false)
+	value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "bytea"}, NotNull: true}, false)
 	if err != nil || value.typeName == "Buffer" {
 		t.Fatalf("Buffer import did not avoid a declaration: %+v, %v", value, err)
 	}
@@ -166,7 +166,7 @@ func TestDriverTypeImports(t *testing.T) {
 	}
 	m = driverTypeModule("pg", "postgresql")
 	m.gen.options.Overrides = []opts.Override{{DBType: "bytea", TSType: "string", Codec: &opts.Import{Path: "./codecs.ts", Name: "hex"}}}
-	if _, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "bytea"}, NotNull: true}, false); err != nil {
+	if _, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "bytea"}, NotNull: true}, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(m.source(), "node:buffer") {
@@ -178,7 +178,7 @@ func TestDriverTypeImports(t *testing.T) {
 func TestArrayCodecs(t *testing.T) {
 	m := driverTypeModule("pg", "postgresql")
 	m.gen.options.Overrides = []opts.Override{{DBType: "int8", TSType: "bigint", Codec: &opts.Import{Path: "./codecs.ts", Name: "bigInteger"}}}
-	value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "int8"}, IsArray: true, NotNull: true}, false)
+	value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "int8"}, IsArray: true, NotNull: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestSQLiteNativeTypes(t *testing.T) {
 			{"date", "date", "Date"}, {"numeric", "number", "number"},
 			{"blob", "bytes", "Uint8Array"}, {"json", "json", "Uint8Array"},
 		} {
-			value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: test.sql}, NotNull: true}, false)
+			value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: test.sql}, NotNull: true}, false)
 			if err != nil || value.kind != test.kind || value.typeName != test.typ {
 				t.Fatalf("%s %s = %+v, %v", driver, test.sql, value, err)
 			}
@@ -213,11 +213,11 @@ func TestSQLiteNativeTypes(t *testing.T) {
 func TestInvalidArrayDimensions(t *testing.T) {
 	m := driverTypeModule("pg", "postgresql")
 	for _, dims := range []int32{-1, 7, 1<<31 - 1} {
-		if _, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "int4"}, IsArray: true, ArrayDims: dims}, false); err == nil {
+		if _, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "int4"}, IsArray: true, ArrayDims: dims}, false); err == nil {
 			t.Errorf("accepted invalid array rank %d", dims)
 		}
 	}
-	if _, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Name: "int4"}, IsArray: true, ArrayDims: 6}, false); err != nil {
+	if _, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Name: "int4"}, IsArray: true, ArrayDims: 6}, false); err != nil {
 		t.Fatalf("rejected PostgreSQL's maximum array rank: %v", err)
 	}
 }
@@ -230,7 +230,7 @@ func TestQualifiedDriverOverrides(t *testing.T) {
 		DBType: "pg_catalog.bytea", TSType: "ImageBytes",
 		Import: &opts.Import{Path: "./types.ts", Name: "ImageBytes"},
 	}}
-	value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Schema: "pg_catalog", Name: "bytea"}, NotNull: true}, false)
+	value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Schema: "pg_catalog", Name: "bytea"}, NotNull: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

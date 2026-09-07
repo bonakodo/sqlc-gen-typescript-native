@@ -3,11 +3,12 @@
 package main
 
 import (
-	"github.com/sqlc-dev/plugin-sdk-go/codegen"
+	"os"
 
 	typescript "github.com/bonakodo/sqlc-gen-typescript-native"
+	"github.com/bonakodo/sqlc-gen-typescript-native/internal/transport"
 )
 
 func main() {
-	codegen.Run(typescript.Generate)
+	os.Exit(transport.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, typescript.Generate))
 }

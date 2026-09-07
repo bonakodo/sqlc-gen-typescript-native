@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
+	"github.com/bonakodo/sqlc-gen-typescript-native/internal/pattern"
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/tsast"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
-	"github.com/sqlc-dev/plugin-sdk-go/sdk"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // valueType describes the declared application type and its runtime conversion.
@@ -35,7 +35,7 @@ type field struct {
 	// name is the allocated TypeScript property key.
 	name string
 	// column supplies source identity and SQL documentation.
-	column *plugin.Column
+	column *protocol.Column
 	// value defines the field's application type and conversion.
 	value valueType
 	// children expands an embedded table into positional result columns.
@@ -43,7 +43,7 @@ type field struct {
 }
 
 // sqliteKind mirrors Go's SQLite mappings using TypeScript's native value types.
-func sqliteKind(column *plugin.Column) (string, string) {
+func sqliteKind(column *protocol.Column) (string, string) {
 	name := strings.ToLower(column.GetType().GetName())
 	if i := strings.IndexByte(name, '('); i >= 0 {
 		name = name[:i]
@@ -75,7 +75,7 @@ func sqliteKind(column *plugin.Column) (string, string) {
 
 // columnOverride finds the first column override, then the first matching type
 // override. Catalog identity and OriginalName survive aliases and generated names.
-func (g *generator) columnOverride(column *plugin.Column) *opts.Override {
+func (g *generator) columnOverride(column *protocol.Column) *opts.Override {
 	name := column.GetOriginalName()
 	if name == "" {
 		name = column.GetName()
@@ -98,8 +98,9 @@ func (g *generator) columnOverride(column *plugin.Column) *opts.Override {
 			continue
 		}
 		matches := true
-		for j, pattern := range parts {
-			if !sdk.MatchString(pattern, actual[4-len(parts)+j]) {
+		for j, part := range parts {
+			matcher, err := pattern.MatchCompile(part)
+			if err != nil || !matcher.MatchString(actual[4-len(parts)+j]) {
 				matches = false
 				break
 			}
@@ -123,9 +124,9 @@ func (g *generator) columnOverride(column *plugin.Column) *opts.Override {
 
 // resolveType selects conversions and imports before applying null and slice
 // wrapping. Codec-free custom types must refine the default runtime type.
-func (m *module) resolveType(column *plugin.Column, forceNullable bool) (valueType, error) {
+func (m *module) resolveType(column *protocol.Column, forceNullable bool) (valueType, error) {
 	if column == nil {
-		column = &plugin.Column{}
+		column = &protocol.Column{}
 	}
 	// PostgreSQL permits at most six array dimensions. Reject corrupt compiler
 	// metadata before source generation can allocate nested type expressions.
@@ -223,7 +224,7 @@ func (m *module) typeText(value valueType) string {
 }
 
 // makeFields allocates properties once so interface and row access agree.
-func (m *module) makeFields(columns []*plugin.Column, forceNullable bool) ([]field, error) {
+func (m *module) makeFields(columns []*protocol.Column, forceNullable bool) ([]field, error) {
 	names := nameSet{}
 	fields := make([]field, 0, len(columns))
 	for i, col := range columns {

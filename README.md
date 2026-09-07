@@ -4,9 +4,11 @@ A pure Go TypeScript generator for [sqlc](https://sqlc.dev). Use it as a Go libr
 a process plugin, or a WASI WebAssembly plugin.
 
 The generator uses a small Go source emitter adapted from TypeScript 7 through
-the local native sqlc implementation. Its build and generation need only Go. Node, Deno, Bun,
-TypeScript, Javy, and a database are not build dependencies. Generated programs
-use the selected JavaScript runtime and database driver.
+the local native sqlc implementation. The Go library and native process plugin
+build with Go. The release Wasm uses TinyGo and Binaryen, with a custom protobuf
+codec generated from sqlc's pinned schema. It imports no sqlc SDK, gRPC, or
+protobuf runtime. Node, Deno, Bun, TypeScript, Javy, and a database are not plugin
+build dependencies. Generated programs use the selected runtime and driver.
 
 ## Use a release
 
@@ -30,15 +32,32 @@ Keep the version URL and matching checksum pinned in your config.
 ## Build locally
 
 Requires Go 1.26.5, or a Go installation that can download that toolchain.
+Install the pinned build tools once, then build both plugins:
 
 ```sh
+make tools
 make all
 ```
 
 This builds two independent plugins:
 
-- `bin/sqlc-gen-typescript-native.wasm`: WASI (`GOOS=wasip1 GOARCH=wasm`).
+- `bin/sqlc-gen-typescript-native.wasm`: optimized TinyGo WASI plugin.
 - `bin/sqlc-gen-typescript-native`: native process plugin.
+
+`make tools` downloads TinyGo 0.42.0, Binaryen 132, and protoc 36.1, verifies their
+SHA-256 hashes, and extracts them into the ignored `bin/.tools` directory. It
+supports macOS and Linux on arm64 and amd64, without changing system settings.
+Ordinary builds do not install tools. Set `GO`, `TINYGO`, or `WASMOPT` to use
+explicit executable paths; the Wasm build checks the pinned compiler versions.
+protoc is used only when regenerating or checking the committed message code.
+
+Use `make build` for only the native plugin, or `make wasm` for the optimized
+Wasm and its `.wasm.sha256` file. `make wasm-go` builds a separate standard Go
+Wasm for comparison. The release build uses conservative garbage collection
+for the smallest tested file, keeps bounds checks and panic recovery, and runs
+two Binaryen size passes. `TINYGO_GC=precise make wasm` uses more code but ran
+about 2.4 times faster on a 512-column, 24-query stress fixture. Both builds
+produced identical output; this measurement is not a general speed guarantee.
 
 Use the absolute path to the local WASM file:
 
@@ -71,9 +90,10 @@ To use the process plugin, replace `wasm` with:
       cmd: /absolute/path/sqlc-gen-typescript-native/bin/sqlc-gen-typescript-native
 ```
 
-Both entry points use sqlc's protobuf plugin protocol and the official Go plugin
-SDK. The process exits after one request. Diagnostics go to stderr; stdout holds
-only the protobuf response.
+Both entry points use sqlc's protobuf plugin protocol. A small local handler
+reads one request, calls the generator, and writes one response. The process
+exits after that request. Diagnostics go to stderr; stdout holds only the
+protobuf response.
 
 ## Drivers and runtimes
 
@@ -370,10 +390,10 @@ import (
     "encoding/json"
 
     typescript "github.com/bonakodo/sqlc-gen-typescript-native"
-    "github.com/sqlc-dev/plugin-sdk-go/plugin"
+    "github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
-func generate(ctx context.Context, req *plugin.GenerateRequest) (*plugin.GenerateResponse, error) {
+func generate(ctx context.Context, req *protocol.GenerateRequest) (*protocol.GenerateResponse, error) {
     options, err := json.Marshal(typescript.Options{Runtime: "node", Driver: "pg"})
     if err != nil {
         return nil, err
@@ -388,6 +408,15 @@ launches a process, or changes the supplied request. The caller provides sqlc's
 analyzed settings, catalog, queries, and JSON options. Missing or unsupported
 metadata produces an error without a partial response.
 
+Go callers upgrading from v0.1.0 must change their SDK message imports to this
+project's `protocol` package. Those are distinct Go types; sqlc's on-wire
+protocol is unchanged. The local messages provide `Marshal() ([]byte, error)`,
+`Unmarshal([]byte) error`, nil-safe getters, and deep `Clone()` methods.
+`Unmarshal` resets the receiver, validates string UTF-8, merges repeated
+occurrences of singular messages, and retains unknown fields. Message and
+unknown-group nesting share a limit of 100 levels, counting the root as one.
+The schema has no recursive message types.
+
 ## Development
 
 To publish a release, push a new tag such as `v1.2.3` on a commit containing the
@@ -398,16 +427,29 @@ and release notes with a ready-to-use config. Tags containing a hyphen, such as
 download URLs and checksums stay valid.
 
 ```sh
-make check                    # formatting, vet, Go tests, WASM build
+make tools                    # install pinned compilers into bin/.tools
+make generate                 # regenerate the custom codec from the schema
+make check                    # formatting, code generation, vet, tests, WASM
 make integration              # stock sqlc, TypeScript 7, Deno, Node, and Bun
 make live                     # live PostgreSQL/MySQL tests after integration
 ```
 
-The integration suite needs sqlc, Go, Node, npm, and Deno. Its JavaScript packages,
+The integration suite needs sqlc, Go, the Wasm build tools, Node, npm, and Deno. Its JavaScript packages,
 including the pinned Bun binary, are test-only dependencies with a checked-in
 lockfile. It compares process and WASM output through stock sqlc, checks all
 runtime/driver combinations against real package declarations, and runs generated
 queries under Deno, Node, and Bun.
+
+Protocol tests compare every message and field against a separate upstream
+protobuf implementation used only by host tests. They cover malformed input,
+UTF-8, unknown fields and groups, duplicate fields, deep copies, and nesting
+limits. `go test ./protocol -fuzz=FuzzWire -fuzztime=60s` runs differential
+fuzzing. `make check-generator` checks generated code without rewriting it.
+Integration tests send valid and malformed requests to both the native plugin
+and the final optimized Wasm, then compare all driver and option fixtures.
+The Wasm build rejects SDK/protobuf runtime imports and files at or above
+1,050,000 bytes. The generated code and its small wire helpers are in
+`protocol/`; the pinned upstream schema and license live beside them.
 
 `make live` uses dedicated PostgreSQL and MySQL test databases. It creates and
 drops fixture tables in them. Set `SQLC_LIVE_PG_URL` and `SQLC_LIVE_MYSQL_URL` to

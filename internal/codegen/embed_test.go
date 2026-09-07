@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/internal/testpb"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -21,11 +22,19 @@ func TestStockEmbedNullability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := new(plugin.GenerateRequest)
-	if err := protojson.Unmarshal(data, req); err != nil {
+	req := new(protocol.GenerateRequest)
+	var reference testpb.GenerateRequest
+	if err := protojson.Unmarshal(data, &reference); err != nil {
 		t.Fatal(err)
 	}
-	before := proto.Clone(req)
+	wire, err := proto.Marshal(&reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := req.Unmarshal(wire); err != nil {
+		t.Fatal(err)
+	}
+	before := req.Clone()
 	g := &generator{request: req, options: opts.Options{Driver: "pg"}, byTable: map[string]*model{}}
 	if err := g.buildModels(); err != nil {
 		t.Fatal(err)
@@ -64,7 +73,7 @@ func TestStockEmbedNullability(t *testing.T) {
 	if !strings.Contains(source, `nickname: _sqlcImportDecodeValue<string | null>("string", row[2], true, false)`) {
 		t.Fatal("inner join discarded catalog column nullability")
 	}
-	if !proto.Equal(req, before) {
+	if !wireEqual(req, before) {
 		t.Fatal("embed inference mutated the caller's request")
 	}
 }
@@ -130,26 +139,26 @@ func TestEmbedRichMetadata(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			req := compatibilityRequest(opts.Options{Driver: "pg"})
 			req.Settings.Engine = engine
-			req.Catalog.Schemas = []*plugin.Schema{{Name: "public", Tables: []*plugin.Table{{
-				Rel:     &plugin.Identifier{Name: "students"},
-				Columns: []*plugin.Column{{Name: "id", NotNull: true, Type: &plugin.Identifier{Name: "integer"}}},
+			req.Catalog.Schemas = []*protocol.Schema{{Name: "public", Tables: []*protocol.Table{{
+				Rel:     &protocol.Identifier{Name: "students"},
+				Columns: []*protocol.Column{{Name: "id", NotNull: true, Type: &protocol.Identifier{Name: "integer"}}},
 			}}}}
 			g := &generator{request: req, options: opts.Options{Driver: "pg"}, byTable: map[string]*model{}}
 			if err := g.buildModels(); err != nil {
 				t.Fatal(err)
 			}
 			m := g.newModule("query_sql.ts")
-			for _, column := range []*plugin.Column{
-				{Name: "student", EmbedTable: &plugin.Identifier{Name: "students"}, Table: &plugin.Identifier{Name: "students"}},
-				{Name: "student", EmbedTable: &plugin.Identifier{Name: "students"}, TableAlias: "students"},
+			for _, column := range []*protocol.Column{
+				{Name: "student", EmbedTable: &protocol.Identifier{Name: "students"}, Table: &protocol.Identifier{Name: "students"}},
+				{Name: "student", EmbedTable: &protocol.Identifier{Name: "students"}, TableAlias: "students"},
 			} {
-				query := &plugin.Query{Text: "SELECT students.id FROM students", Columns: []*plugin.Column{column}}
+				query := &protocol.Query{Text: "SELECT students.id FROM students", Columns: []*protocol.Column{column}}
 				if m.embedColumns(query)[0].NotNull {
 					t.Fatal("inference replaced the host's explicit nullable metadata")
 				}
 			}
-			column := &plugin.Column{Name: "student", EmbedTable: &plugin.Identifier{Name: "students"}, NotNull: true}
-			query := &plugin.Query{Text: "WITH students AS (SELECT 1) SELECT * FROM students", Columns: []*plugin.Column{column}}
+			column := &protocol.Column{Name: "student", EmbedTable: &protocol.Identifier{Name: "students"}, NotNull: true}
+			query := &protocol.Query{Text: "WITH students AS (SELECT 1) SELECT * FROM students", Columns: []*protocol.Column{column}}
 			if !m.embedColumns(query)[0].NotNull {
 				t.Fatal("unsupported SQL discarded the host's explicit non-null metadata")
 			}

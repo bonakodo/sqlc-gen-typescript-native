@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // TestServerJSONTypes keeps JSON null within the type even for SQL NOT NULL,
@@ -17,9 +17,9 @@ func TestServerJSONTypes(t *testing.T) {
 		for _, undefined := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/undefined=%t", driver, undefined), func(t *testing.T) {
 				req := compatibilityRequest(opts.Options{Driver: driver, TypesOnly: true, EmitNullAsUndefined: undefined})
-				req.Queries[0].Columns = []*plugin.Column{
-					{Name: "required", Type: &plugin.Identifier{Name: "json"}, NotNull: true},
-					{Name: "optional", Type: &plugin.Identifier{Name: "json"}},
+				req.Queries[0].Columns = []*protocol.Column{
+					{Name: "required", Type: &protocol.Identifier{Name: "json"}, NotNull: true},
+					{Name: "optional", Type: &protocol.Identifier{Name: "json"}},
 				}
 				response, err := Generate(context.Background(), req)
 				if err != nil {
@@ -63,8 +63,8 @@ func TestJSONStaticOverride(t *testing.T) {
 				}}})
 				query := req.Queries[0]
 				query.Filename = "nested/query.sql"
-				query.Columns = []*plugin.Column{{Name: "document", Type: &plugin.Identifier{Name: "json"}, NotNull: true}}
-				query.Params[0].Column = &plugin.Column{Name: "document", Type: &plugin.Identifier{Name: "json"}, NotNull: true}
+				query.Columns = []*protocol.Column{{Name: "document", Type: &protocol.Identifier{Name: "json"}, NotNull: true}}
+				query.Params[0].Column = &protocol.Column{Name: "document", Type: &protocol.Identifier{Name: "json"}, NotNull: true}
 				response, err := Generate(context.Background(), req)
 				if err != nil {
 					t.Fatal(err)
@@ -90,9 +90,9 @@ func TestJSONStaticOverride(t *testing.T) {
 // table would otherwise have the same name as a recursive JSON helper type.
 func TestJSONHelpersAvoidModelCollision(t *testing.T) {
 	req := compatibilityRequest(opts.Options{Driver: "pg", TypesOnly: true})
-	req.Catalog.Schemas = []*plugin.Schema{{Name: "public", Tables: []*plugin.Table{{
-		Rel:     &plugin.Identifier{Name: "json_values"},
-		Columns: []*plugin.Column{{Name: "document", Type: &plugin.Identifier{Name: "jsonb"}, NotNull: true}},
+	req.Catalog.Schemas = []*protocol.Schema{{Name: "public", Tables: []*protocol.Table{{
+		Rel:     &protocol.Identifier{Name: "json_values"},
+		Columns: []*protocol.Column{{Name: "document", Type: &protocol.Identifier{Name: "jsonb"}, NotNull: true}},
 	}}}}
 	response, err := Generate(context.Background(), req)
 	if err != nil {

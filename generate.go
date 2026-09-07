@@ -6,7 +6,7 @@ package typescript
 import (
 	"context"
 
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 
 	codegen "github.com/bonakodo/sqlc-gen-typescript-native/internal/codegen"
 )
@@ -15,6 +15,6 @@ import (
 // PluginOptions field contains the JSON generator options, and file names in
 // the response are relative to the output directory selected in sqlc's config.
 // Generate does not read or write files and does not change req.
-func Generate(ctx context.Context, req *plugin.GenerateRequest) (*plugin.GenerateResponse, error) {
+func Generate(ctx context.Context, req *protocol.GenerateRequest) (*protocol.GenerateResponse, error) {
 	return codegen.Generate(ctx, req)
 }

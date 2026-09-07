@@ -7,26 +7,25 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
-	"google.golang.org/protobuf/proto"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // enumRequest includes shared column metadata, an unused enum, and an empty
 // enum. PostgreSQL allows creating an enum with no labels before ALTER TYPE.
-func enumRequest(options opts.Options) *plugin.GenerateRequest {
+func enumRequest(options opts.Options) *protocol.GenerateRequest {
 	req := compatibilityRequest(options)
-	column := &plugin.Column{Name: "status", Type: &plugin.Identifier{Name: "status"}, NotNull: true}
-	req.Catalog.Schemas = []*plugin.Schema{{Name: "public",
-		Enums: []*plugin.Enum{
+	column := &protocol.Column{Name: "status", Type: &protocol.Identifier{Name: "status"}, NotNull: true}
+	req.Catalog.Schemas = []*protocol.Schema{{Name: "public",
+		Enums: []*protocol.Enum{
 			{Name: "status", Vals: []string{"active", "has\"quote", "active", "", "line\nbreak", "${value}`\\", "日本語"}},
 			{Name: "unused", Vals: []string{"unused"}},
 			{Name: "empty"},
 		},
-		Tables: []*plugin.Table{{Rel: &plugin.Identifier{Name: "accounts"}, Columns: []*plugin.Column{column}}},
+		Tables: []*protocol.Table{{Rel: &protocol.Identifier{Name: "accounts"}, Columns: []*protocol.Column{column}}},
 	}}
 	req.Queries[0].Filename = "nested/status.sql"
 	req.Queries[0].Params[0].Column = column
-	req.Queries[0].Columns = []*plugin.Column{column}
+	req.Queries[0].Columns = []*protocol.Column{column}
 	return req
 }
 
@@ -37,12 +36,12 @@ func TestEnumExports(t *testing.T) {
 		for _, typesOnly := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/typesOnly=%t", driver, typesOnly), func(t *testing.T) {
 				req := enumRequest(opts.Options{Driver: driver, TypesOnly: typesOnly})
-				before := proto.Clone(req)
+				before := req.Clone()
 				response, err := Generate(context.Background(), req)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !proto.Equal(before, req) {
+				if !wireEqual(before, req) {
 					t.Fatal("enum generation mutated the request")
 				}
 				enums := typesTestFile(t, response, "enums.ts")
@@ -86,9 +85,9 @@ func TestEnumExports(t *testing.T) {
 func TestEnumNamesAvoidExportCollisions(t *testing.T) {
 	req := enumRequest(opts.Options{Driver: "pg", TypesOnly: true})
 	req.Catalog.Schemas[0].Tables = append(req.Catalog.Schemas[0].Tables,
-		&plugin.Table{Rel: &plugin.Identifier{Name: "statuses"}},
+		&protocol.Table{Rel: &protocol.Identifier{Name: "statuses"}},
 	)
-	req.Catalog.Schemas[0].Enums = []*plugin.Enum{
+	req.Catalog.Schemas[0].Enums = []*protocol.Enum{
 		{Name: "status", Vals: []string{"active"}},
 		{Name: "status_values", Vals: []string{"listed"}},
 		{Name: "a", Vals: []string{"first"}},
@@ -115,7 +114,7 @@ func TestEnumNamesAvoidExportCollisions(t *testing.T) {
 		entries[i], entries[j] = entries[j], entries[i]
 	}
 	second, err := Generate(context.Background(), req)
-	if err != nil || !proto.Equal(first, second) {
+	if err != nil || !wireEqual(first, second) {
 		t.Fatalf("enum catalog order changed output: %v", err)
 	}
 }
@@ -124,9 +123,9 @@ func TestEnumNamesAvoidExportCollisions(t *testing.T) {
 // supports both explicit metadata and older schema-prefixed type names.
 func TestEnumTypeIdentity(t *testing.T) {
 	m := driverTypeModule("pg", "postgresql")
-	m.gen.request.Catalog.Schemas = []*plugin.Schema{
-		{Name: "public", Enums: []*plugin.Enum{{Name: "status", Vals: []string{"active"}}, {Name: "has.dot", Vals: []string{"dot"}}}},
-		{Name: "archive", Enums: []*plugin.Enum{{Name: "status", Vals: []string{"archived"}}}},
+	m.gen.request.Catalog.Schemas = []*protocol.Schema{
+		{Name: "public", Enums: []*protocol.Enum{{Name: "status", Vals: []string{"active"}}, {Name: "has.dot", Vals: []string{"dot"}}}},
+		{Name: "archive", Enums: []*protocol.Enum{{Name: "status", Vals: []string{"archived"}}}},
 	}
 	if err := m.gen.buildEnums(); err != nil {
 		t.Fatal(err)
@@ -140,7 +139,7 @@ func TestEnumTypeIdentity(t *testing.T) {
 		{"public", "has.dot", "_sqlcImportHasDot"},
 		{"unknown", "status", "string"},
 	} {
-		value, err := m.resolveType(&plugin.Column{Type: &plugin.Identifier{Schema: test.schema, Name: test.name}, NotNull: true, IsArray: true}, false)
+		value, err := m.resolveType(&protocol.Column{Type: &protocol.Identifier{Schema: test.schema, Name: test.name}, NotNull: true, IsArray: true}, false)
 		if err != nil || value.typeName != test.want || m.typeText(value) != "ReadonlyArray<"+test.want+" | null>" {
 			t.Errorf("%s.%s = %+v, %v", test.schema, test.name, value, err)
 		}

@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - run: make tools
       - name: Test and build WASM
         run: make check
       - name: Install stock sqlc
@@ -38,7 +39,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cd bin
-          sha256sum sqlc-gen-typescript-native.wasm > sqlc-gen-typescript-native.wasm.sha256
+          sha256sum --check sqlc-gen-typescript-native.wasm.sha256
           checksum=$(cut -d ' ' -f 1 sqlc-gen-typescript-native.wasm.sha256)
           cat > release-notes.md <<EOF
           Use this release in your sqlc configuration:

@@ -3,14 +3,14 @@ package typescript
 import (
 	"strings"
 
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // sqlType selects the values returned by the chosen driver's default parsers.
 // PostgreSQL scalar int8 and numeric stay strings: converting either to a
 // JavaScript number would discard precision. SQLite uses the older plugin's
 // driver-specific types unless native conversion mode is explicitly selected.
-func (m *module) sqlType(column *plugin.Column) (string, string) {
+func (m *module) sqlType(column *protocol.Column) (string, string) {
 	if enum := m.gen.enumForColumn(column); enum != nil {
 		return "string", enum.name
 	}
@@ -30,7 +30,7 @@ func (m *module) sqlType(column *plugin.Column) (string, string) {
 // databaseTypeName accepts both sqlc's separate schema field and older requests
 // with a pg_catalog. prefix in the name. Size annotations do not change a type's
 // representation; remove them without dropping words such as "unsigned".
-func databaseTypeName(column *plugin.Column) string {
+func databaseTypeName(column *protocol.Column) string {
 	name := strings.ToLower(column.GetType().GetName())
 	name = strings.TrimPrefix(name, "pg_catalog.")
 	if index := strings.IndexByte(name, '('); index >= 0 {
@@ -42,7 +42,7 @@ func databaseTypeName(column *plugin.Column) string {
 // postgresType reflects pg and postgres.js without installing custom parsers.
 // Both expose large scalar integers and decimals as text. Their geometry and interval parsers differ, so those branches
 // must follow the driver instead of the SQL dialect alone.
-func (m *module) postgresType(column *plugin.Column) (string, string) {
+func (m *module) postgresType(column *protocol.Column) (string, string) {
 	pg := m.gen.options.DriverName() == "pg"
 	switch databaseTypeName(column) {
 	case "smallint", "integer", "int", "int2", "int4", "smallserial", "serial", "serial2", "serial4", "float4", "float8", "real", "double precision", "oid":
@@ -88,7 +88,7 @@ func (m *module) postgresType(column *plugin.Column) (string, string) {
 // mysqlType follows mysql2/promise's default parsers. The two BIGINT options
 // apply to each generated query and determine its result contract.
 // In particular, DECIMAL stays text regardless of support_big_numbers.
-func (m *module) mysqlType(column *plugin.Column) (string, string) {
+func (m *module) mysqlType(column *protocol.Column) (string, string) {
 	switch databaseTypeName(column) {
 	case "bigint", "bigint unsigned", "bigint signed":
 		if m.gen.options.MySQL2.SupportBigNumbers {
@@ -116,7 +116,7 @@ func (m *module) mysqlType(column *plugin.Column) (string, string) {
 // importSQLType adds driver-specific type imports only when the final type uses
 // them. A codec override can replace Buffer with an unrelated application type;
 // eager imports would leave invalid noUnusedLocals output in that case.
-func (m *module) importSQLType(value *valueType, column *plugin.Column) {
+func (m *module) importSQLType(value *valueType, column *protocol.Column) {
 	var path, name string
 	if enum := m.gen.enumForColumn(column); enum != nil {
 		path, name = "./enums.ts", enum.name
@@ -150,7 +150,7 @@ func (m *module) importSQLType(value *valueType, column *plugin.Column) {
 // converts safe bigints to numbers to retain the existing value contract. better-sqlite3
 // retains its advertised boolean/Date types using checked native conversions,
 // fixing the old wrappers' unchecked casts without changing their declarations.
-func (m *module) sqliteDriverType(column *plugin.Column) (string, string) {
+func (m *module) sqliteDriverType(column *protocol.Column) (string, string) {
 	name := strings.ReplaceAll(databaseTypeName(column), " ", "")
 	deno := m.gen.options.DriverName() == "@bonakodo/sqlite"
 	switch name {

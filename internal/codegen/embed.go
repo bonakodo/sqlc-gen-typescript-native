@@ -3,8 +3,7 @@ package typescript
 import (
 	"strings"
 
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
-	"google.golang.org/protobuf/proto"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // embedColumns fills the nullability omitted from embedded columns by stock
@@ -16,7 +15,7 @@ import (
 //
 // This is deliberately not a second SQL analyzer. It only recognizes base-table
 // references, aliases, and ordinary join trees; sqlc still resolves all types.
-func (m *module) embedColumns(query *plugin.Query) []*plugin.Column {
+func (m *module) embedColumns(query *protocol.Query) []*protocol.Column {
 	needed := false
 	for _, col := range query.Columns {
 		if legacyEmbed(col) {
@@ -35,7 +34,7 @@ func (m *module) embedColumns(query *plugin.Query) []*plugin.Column {
 	if !ok {
 		return query.Columns
 	}
-	columns := append([]*plugin.Column(nil), query.Columns...)
+	columns := append([]*protocol.Column(nil), query.Columns...)
 	position := 0
 	for i, col := range columns {
 		width := 1
@@ -63,7 +62,7 @@ func (m *module) embedColumns(query *plugin.Query) []*plugin.Column {
 				required = required && relation.required
 			}
 			if found && required {
-				columns[i] = proto.Clone(col).(*plugin.Column)
+				columns[i] = col.Clone()
 				columns[i].NotNull = true
 			}
 		}
@@ -72,11 +71,11 @@ func (m *module) embedColumns(query *plugin.Query) []*plugin.Column {
 	return columns
 }
 
-func legacyEmbed(col *plugin.Column) bool {
+func legacyEmbed(col *protocol.Column) bool {
 	return col != nil && col.EmbedTable != nil && !col.NotNull && col.Table == nil && col.TableAlias == ""
 }
 
-func (m *module) embedTableMatches(parts []string, table *plugin.Identifier) bool {
+func (m *module) embedTableMatches(parts []string, table *protocol.Identifier) bool {
 	actual := []string{table.Catalog, table.Schema, table.Name}
 	if actual[1] == "" {
 		actual[1] = m.gen.request.Catalog.DefaultSchema

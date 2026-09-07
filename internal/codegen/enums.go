@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/tsast"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // enumKey keeps schema and type names separate: quoted SQL identifiers may
@@ -92,7 +92,7 @@ func (g *generator) buildEnums() error {
 // Prefer an exact catalog name before splitting dots so a quoted type name in
 // the default schema retains its identity. Bare MySQL enum metadata, without
 // catalog labels, continues to use the driver's string fallback.
-func (g *generator) enumForColumn(column *plugin.Column) *catalogEnum {
+func (g *generator) enumForColumn(column *protocol.Column) *catalogEnum {
 	if column.GetType() == nil {
 		return nil
 	}

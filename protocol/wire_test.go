@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"math"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
+	oracle "github.com/bonakodo/sqlc-gen-typescript-native/internal/testpb"
 	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
-	oracle "github.com/sqlc-dev/plugin-sdk-go/plugin"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -56,7 +58,7 @@ func varintField(number protowire.Number, value uint64) []byte {
 
 func concat(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
 
-// Include every legal wire form, reserved schema field 100, the largest legal
+// Include every legal wire form, unused field 100, the largest legal
 // field number, and a group. Unknown bytes must survive without normalization.
 func unknownFields() []byte {
 	return concat(
@@ -153,9 +155,30 @@ func compareDecode(t testing.TB, tc messageCase, wire []byte) {
 	if !proto.Equal(want, decoded) {
 		t.Fatalf("%s: decoded values differ for %x\nwant %v\ngot  %v", tc.name, wire, want, decoded)
 	}
-	// The custom codec emits fields in schema order and retains unknown bytes.
-	if wantWire := marshalOracle(t, want); !bytes.Equal(gotWire, wantWire) {
+	// Canonical inputs retain canonical encoding. For arbitrary inputs, the
+	// oracle normalizes unknown field tags while this codec preserves their
+	// exact bytes, so semantic comparison above is the applicable check.
+	if wantWire := marshalOracle(t, want); bytes.Equal(wire, wantWire) && !bytes.Equal(gotWire, wantWire) {
 		t.Fatalf("%s: canonical bytes differ\nwant %x\ngot  %x", tc.name, wantWire, gotWire)
+	}
+}
+
+func TestUnknownFieldsKeepOriginalTagEncoding(t *testing.T) {
+	inputs := [][]byte{
+		{0xa0, 0x86, 0, 0x81, 0},             // Non-minimal field 100 tag and varint value.
+		{0xa3, 0x86, 0, 8, 1, 0xa4, 0x86, 0}, // Non-minimal group boundaries.
+	}
+	for _, tc := range messageCases() {
+		for _, wire := range inputs {
+			local := tc.newLocal()
+			if err := local.Unmarshal(wire); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if got := marshalLocal(t, local); !bytes.Equal(got, wire) {
+				t.Fatalf("%s changed unknown wire bytes: want %x, got %x", tc.name, wire, got)
+			}
+			compareDecode(t, tc, wire)
+		}
 	}
 }
 
@@ -219,6 +242,7 @@ func TestWireDuplicateAndScalarRules(t *testing.T) {
 		{"known message with wrong wire is unknown", 12, varintField(1, 7)},
 		{"known string with group wire is unknown", 8, concat(protowire.AppendTag(nil, 3, protowire.StartGroupType), varintField(1, 7), protowire.AppendTag(nil, 3, protowire.EndGroupType))},
 		{"forward request field", 12, bytesField(127, []byte("future metadata"))},
+		{"reserved historical field retained", 1, bytesField(5, []byte("legacy settings"))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { compareDecode(t, messageCases()[tc.kind], tc.wire) })
@@ -275,7 +299,7 @@ func TestWireValidatesUTF8(t *testing.T) {
 					t.Fatal("Unmarshal accepted invalid UTF-8 string")
 				}
 				local := tc.newLocal()
-				value := reflect.ValueOf(local).Elem().FieldByName(reflect.TypeOf(tc.newOracle()).Elem().Field(i + 3).Name)
+				value := reflect.ValueOf(local).Elem().FieldByName(oracleFieldName(tc.newOracle(), field.Number()))
 				if field.IsList() {
 					value.Set(reflect.ValueOf([]string{string(invalid)}))
 				} else {
@@ -299,35 +323,65 @@ func TestWireValidatesUTF8(t *testing.T) {
 	}
 }
 
-func TestWireDepthLimit(t *testing.T) {
-	groups := func(depth int) []byte {
-		var wire []byte
-		for i := 0; i < depth; i++ {
-			wire = protowire.AppendTag(wire, 100, protowire.StartGroupType)
-		}
-		for i := 0; i < depth; i++ {
-			wire = protowire.AppendTag(wire, 100, protowire.EndGroupType)
-		}
-		return wire
+func nestedGroups(depth int) []byte {
+	var wire []byte
+	for i := 0; i < depth; i++ {
+		wire = protowire.AppendTag(wire, 100, protowire.StartGroupType)
 	}
+	for i := 0; i < depth; i++ {
+		wire = protowire.AppendTag(wire, 100, protowire.EndGroupType)
+	}
+	return wire
+}
+
+func TestWireDepthLimit(t *testing.T) {
 	// Count the root message as depth 1. The schema has no recursive messages,
 	// but unknown groups can nest without bound unless the codec caps them.
-	if err := (&protocol.GenerateRequest{}).Unmarshal(groups(99)); err != nil {
+	if err := (&protocol.GenerateRequest{}).Unmarshal(nestedGroups(99)); err != nil {
 		t.Fatalf("100 total levels should fit: %v", err)
 	}
 	for _, depth := range []int{100, 101, 1000} {
-		if err := (&protocol.GenerateRequest{}).Unmarshal(groups(depth)); err == nil {
+		if err := (&protocol.GenerateRequest{}).Unmarshal(nestedGroups(depth)); err == nil {
 			t.Fatalf("accepted %d total levels", depth+1)
 		}
 	}
-	if err := (&protocol.GenerateRequest{}).Unmarshal(bytesField(1, groups(99))); err == nil {
+	if err := (&protocol.GenerateRequest{}).Unmarshal(bytesField(1, nestedGroups(99))); err == nil {
 		t.Fatal("nested messages did not consume the same depth budget as groups")
+	}
+}
+
+func TestMarshalRespectsUnknownGroupDepth(t *testing.T) {
+	for _, groups := range []int{98, 99} {
+		identifier := &protocol.Identifier{}
+		if err := identifier.Unmarshal(nestedGroups(groups)); err != nil {
+			t.Fatal(err)
+		}
+		// Reusing a decoded message deeper in another object must account for
+		// its unknown groups, as well as its known message fields.
+		column := &protocol.Column{Type: identifier}
+		wire, err := column.Marshal()
+		if groups == 99 {
+			if err == nil {
+				t.Fatal("Marshal accepted 101 levels after nesting decoded unknown groups")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("100 levels should fit: %v", err)
+		}
+		if err := (&protocol.Column{}).Unmarshal(wire); err != nil {
+			t.Fatalf("Marshal produced output its own decoder rejects: %v", err)
+		}
 	}
 }
 
 func TestCloneAndInputOwnership(t *testing.T) {
 	for _, tc := range messageCases() {
 		t.Run(tc.name, func(t *testing.T) {
+			nilMessage := reflect.Zero(reflect.TypeOf(tc.newLocal())).Interface().(wireMessage)
+			if !reflect.ValueOf(tc.clone(nilMessage)).IsNil() {
+				t.Fatal("Clone of nil message must remain nil")
+			}
 			full := tc.newOracle()
 			fillOracle(full.ProtoReflect())
 			input := marshalOracle(t, full)
@@ -407,10 +461,11 @@ func FuzzWireOracle(f *testing.F) {
 	f.Add(uint8(12), concat(bytesField(1, bytesField(1, []byte("v1"))), bytesField(1, bytesField(2, []byte("sqlite")))))
 	f.Fuzz(func(t *testing.T, index uint8, wire []byte) {
 		// v1.31's oracle applies its depth option to known messages, but its
-		// unknown-group skipper has a separate 10,000-level limit. Bound this
-		// differential test well below our 100-level limit; test that limit
-		// directly above. Each group needs at least two input bytes.
-		if len(wire) > 180 && containsGroup(wire) {
+		// unknown-group skipper has a separate 10,000-level limit. Reserve
+		// ten levels for known messages (the pinned schema needs at most six)
+		// and keep this differential test below our group limit. The exact
+		// limit has its own test above.
+		if tooManyPossibleGroups(wire) {
 			t.Skip()
 		}
 		if len(wire) > 1<<16 {
@@ -422,11 +477,28 @@ func FuzzWireOracle(f *testing.F) {
 
 // This conservative scan may skip byte payloads that resemble groups. It does
 // not grant malformed input any special acceptance in the codec itself.
-func containsGroup(wire []byte) bool {
+func tooManyPossibleGroups(wire []byte) bool {
+	count := 0
 	for _, b := range wire {
 		if b&7 == byte(protowire.StartGroupType) {
-			return true
+			count++
+			if count >= 90 {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func oracleFieldName(message proto.Message, number protoreflect.FieldNumber) string {
+	value := reflect.TypeOf(message).Elem()
+	want := strconv.FormatInt(int64(number), 10)
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		tag := strings.Split(field.Tag.Get("protobuf"), ",")
+		if len(tag) >= 2 && tag[1] == want {
+			return field.Name
+		}
+	}
+	panic("missing Go field in generated oracle")
 }

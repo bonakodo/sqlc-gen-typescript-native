@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // TestPostgresRawArrayResults preserves array NULL spelling while keeping each
@@ -16,11 +16,11 @@ func TestPostgresRawArrayResults(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			req := compatibilityRequest(opts.Options{Driver: "postgres"})
 			req.Queries[0].Cmd = command
-			req.Queries[0].Columns = []*plugin.Column{
-				{Name: "id", Type: &plugin.Identifier{Name: "int4"}, NotNull: true},
-				{Name: "labels", Type: &plugin.Identifier{Name: "text"}, IsArray: true, NotNull: true},
-				{Name: "document", Type: &plugin.Identifier{Name: "jsonb"}, NotNull: true},
-				{Name: "amounts", Type: &plugin.Identifier{Name: "numeric"}, IsArray: true},
+			req.Queries[0].Columns = []*protocol.Column{
+				{Name: "id", Type: &protocol.Identifier{Name: "int4"}, NotNull: true},
+				{Name: "labels", Type: &protocol.Identifier{Name: "text"}, IsArray: true, NotNull: true},
+				{Name: "document", Type: &protocol.Identifier{Name: "jsonb"}, NotNull: true},
+				{Name: "amounts", Type: &protocol.Identifier{Name: "numeric"}, IsArray: true},
 			}
 			source := compatibilitySource(t, req)
 			for _, want := range []string{
@@ -85,17 +85,17 @@ func TestRawArrayColumnIndices(t *testing.T) {
 // an embedded table and confirms raw rows still feed the ordinary nested decoder.
 func TestPostgresEmbeddedRawArrayResults(t *testing.T) {
 	req := compatibilityRequest(opts.Options{Driver: "postgres"})
-	req.Catalog.Schemas = []*plugin.Schema{{Name: "public", Tables: []*plugin.Table{{
-		Rel: &plugin.Identifier{Schema: "public", Name: "records"},
-		Columns: []*plugin.Column{
-			{Name: "id", Type: &plugin.Identifier{Name: "int4"}, NotNull: true},
-			{Name: "labels", Type: &plugin.Identifier{Name: "text"}, IsArray: true},
+	req.Catalog.Schemas = []*protocol.Schema{{Name: "public", Tables: []*protocol.Table{{
+		Rel: &protocol.Identifier{Schema: "public", Name: "records"},
+		Columns: []*protocol.Column{
+			{Name: "id", Type: &protocol.Identifier{Name: "int4"}, NotNull: true},
+			{Name: "labels", Type: &protocol.Identifier{Name: "text"}, IsArray: true},
 		},
 	}}}}
-	req.Queries[0].Columns = []*plugin.Column{
-		{Name: "prefix", Type: &plugin.Identifier{Name: "text"}, NotNull: true},
-		{Name: "record", EmbedTable: &plugin.Identifier{Schema: "public", Name: "records"}, NotNull: true},
-		{Name: "suffix", Type: &plugin.Identifier{Name: "int4"}, NotNull: true},
+	req.Queries[0].Columns = []*protocol.Column{
+		{Name: "prefix", Type: &protocol.Identifier{Name: "text"}, NotNull: true},
+		{Name: "record", EmbedTable: &protocol.Identifier{Schema: "public", Name: "records"}, NotNull: true},
+		{Name: "suffix", Type: &protocol.Identifier{Name: "int4"}, NotNull: true},
 	}
 	source := compatibilitySource(t, req)
 	for _, want := range []string{"result.columns.length !== 4", "if (index === 2) return text;", "record: {", "row[2]"} {
@@ -111,7 +111,7 @@ func TestRawArrayCodecKind(t *testing.T) {
 	req := compatibilityRequest(opts.Options{Driver: "postgres", Overrides: []opts.Override{{
 		DBType: "int4", TSType: "string", Codec: &opts.Import{Path: "./codec.ts", Name: "idCodec"},
 	}}})
-	req.Queries[0].Columns = []*plugin.Column{{Name: "ids", Type: &plugin.Identifier{Name: "int4"}, IsArray: true, NotNull: true}}
+	req.Queries[0].Columns = []*protocol.Column{{Name: "ids", Type: &protocol.Identifier{Name: "int4"}, IsArray: true, NotNull: true}}
 	source := compatibilitySource(t, req)
 	req.Queries[0].Params[0].Column.IsArray = true
 	source = compatibilitySource(t, req)

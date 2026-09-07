@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 GO=${GO:-go}
 SQLC=${SQLC:-sqlc}
 mkdir -p scripts/.integration/live
-CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm "$GO" build -o scripts/.integration/live/plugin.wasm ./plugin
+GO="$GO" scripts/build-wasm.sh scripts/.integration/live/plugin.wasm
 node --input-type=module <<'JS'
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';

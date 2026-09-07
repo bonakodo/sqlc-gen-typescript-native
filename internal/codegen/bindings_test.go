@@ -6,13 +6,12 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
-	"google.golang.org/protobuf/proto"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // testParameter builds immutable argument metadata for binding-plan tests.
 func testParameter(number int, name string, slice bool) *queryParameter {
-	return &queryParameter{number: number, field: field{column: &plugin.Column{Name: name}, value: valueType{slice: slice}}}
+	return &queryParameter{number: number, field: field{column: &protocol.Column{Name: name}, value: valueType{slice: slice}}}
 }
 
 // TestPlanBindings checks SQLite numbering independently of property spelling.
@@ -133,16 +132,16 @@ func TestPlanBindingsSlices(t *testing.T) {
 
 // TestGeneratePreservesInput verifies shared compiler metadata is never renamed.
 func TestGeneratePreservesInput(t *testing.T) {
-	req := &plugin.GenerateRequest{
+	req := &protocol.GenerateRequest{
 		PluginOptions: []byte(`{"runtime":"deno","driver":"@bonakodo/sqlite","sqlite_type_mode":"native"}`),
-		Settings:      &plugin.Settings{Engine: "sqlite"}, Catalog: &plugin.Catalog{},
-		Queries: []*plugin.Query{{Name: "GetName", Filename: "query.sql", Cmd: ":one", Text: "SELECT 1, 2, 3", Columns: []*plugin.Column{
-			{Name: "name", Type: &plugin.Identifier{Name: "integer"}, NotNull: true},
-			{Name: "name", Type: &plugin.Identifier{Name: "integer"}, NotNull: true},
-			{Name: "name", Type: &plugin.Identifier{Name: "integer"}, NotNull: true},
+		Settings:      &protocol.Settings{Engine: "sqlite"}, Catalog: &protocol.Catalog{},
+		Queries: []*protocol.Query{{Name: "GetName", Filename: "query.sql", Cmd: ":one", Text: "SELECT 1, 2, 3", Columns: []*protocol.Column{
+			{Name: "name", Type: &protocol.Identifier{Name: "integer"}, NotNull: true},
+			{Name: "name", Type: &protocol.Identifier{Name: "integer"}, NotNull: true},
+			{Name: "name", Type: &protocol.Identifier{Name: "integer"}, NotNull: true},
 		}}},
 	}
-	before := proto.Clone(req)
+	before := req.Clone()
 	first, err := Generate(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +150,7 @@ func TestGeneratePreservesInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !proto.Equal(req, before) || !proto.Equal(first, second) {
+	if !wireEqual(req, before) || !wireEqual(first, second) {
 		t.Fatal("generation mutated its input or changed between calls")
 	}
 	for _, file := range first.Files {

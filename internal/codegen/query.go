@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/tsast"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // queryParameter pairs an argument field with the compiler's original bind index.
@@ -17,7 +17,7 @@ type queryParameter struct {
 
 // queryPlan allocates public names before imports or private helpers can collide.
 type queryPlan struct {
-	query      *plugin.Query
+	query      *protocol.Query
 	function   string
 	constant   string
 	argsName   string
@@ -29,7 +29,7 @@ type queryPlan struct {
 }
 
 // planQuery validates annotations and resolves all arguments and result fields.
-func (m *module) planQuery(query *plugin.Query) (*queryPlan, error) {
+func (m *module) planQuery(query *protocol.Query) (*queryPlan, error) {
 	switch query.Cmd {
 	case ":one", ":many", ":exec", ":execrows", ":execlastid", ":execresult":
 	default:
@@ -55,7 +55,7 @@ func (m *module) planQuery(query *plugin.Query) (*queryPlan, error) {
 		plan.rowName = m.names.take(base + "Row")
 	}
 	names := nameSet{}
-	params := append([]*plugin.Parameter(nil), query.Params...)
+	params := append([]*protocol.Parameter(nil), query.Params...)
 	for _, param := range params {
 		if param == nil || param.Number < 1 || param.Column == nil {
 			return nil, fmt.Errorf("invalid parameter metadata")

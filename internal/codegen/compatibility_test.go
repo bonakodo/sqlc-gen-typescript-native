@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/bonakodo/sqlc-gen-typescript-native/internal/opts"
-	"github.com/sqlc-dev/plugin-sdk-go/plugin"
+	"github.com/bonakodo/sqlc-gen-typescript-native/protocol"
 )
 
 // compatibilityRequest models the older plugin's common query shapes without
 // selecting native migration options through the native-generator test helper.
-func compatibilityRequest(options opts.Options) *plugin.GenerateRequest {
+func compatibilityRequest(options opts.Options) *protocol.GenerateRequest {
 	engine, integer, placeholder := "sqlite", "integer", "?"
 	switch options.DriverName() {
 	case "pg", "postgres":
@@ -24,18 +24,18 @@ func compatibilityRequest(options opts.Options) *plugin.GenerateRequest {
 	if err != nil {
 		panic(err)
 	}
-	return &plugin.GenerateRequest{
-		Settings:      &plugin.Settings{Engine: engine},
-		Catalog:       &plugin.Catalog{DefaultSchema: "public"},
+	return &protocol.GenerateRequest{
+		Settings:      &protocol.Settings{Engine: engine},
+		Catalog:       &protocol.Catalog{DefaultSchema: "public"},
 		PluginOptions: data,
-		Queries: []*plugin.Query{{
+		Queries: []*protocol.Query{{
 			Name: "GetAuthor", Filename: "query.sql", Cmd: ":one",
 			Text:   "SELECT author_id, first_name, bio FROM authors WHERE author_id = " + placeholder,
-			Params: []*plugin.Parameter{{Number: 1, Column: &plugin.Column{Name: "author_id", Type: &plugin.Identifier{Name: integer}, NotNull: true}}},
-			Columns: []*plugin.Column{
-				{Name: "author_id", Type: &plugin.Identifier{Name: integer}, NotNull: true},
-				{Name: "first_name", Type: &plugin.Identifier{Name: "text"}, NotNull: true},
-				{Name: "bio", Type: &plugin.Identifier{Name: "text"}},
+			Params: []*protocol.Parameter{{Number: 1, Column: &protocol.Column{Name: "author_id", Type: &protocol.Identifier{Name: integer}, NotNull: true}}},
+			Columns: []*protocol.Column{
+				{Name: "author_id", Type: &protocol.Identifier{Name: integer}, NotNull: true},
+				{Name: "first_name", Type: &protocol.Identifier{Name: "text"}, NotNull: true},
+				{Name: "bio", Type: &protocol.Identifier{Name: "text"}},
 			},
 		}},
 	}
@@ -43,7 +43,7 @@ func compatibilityRequest(options opts.Options) *plugin.GenerateRequest {
 
 // compatibilitySource obtains a generated public module and checks one output
 // per filename, fixing the older plugin's duplicate-file response defect.
-func compatibilitySource(t *testing.T, req *plugin.GenerateRequest) string {
+func compatibilitySource(t *testing.T, req *protocol.GenerateRequest) string {
 	t.Helper()
 	response, err := Generate(context.Background(), req)
 	if err != nil {
@@ -127,9 +127,9 @@ func TestCompatibilityNoArgsAndNullPolicy(t *testing.T) {
 	for _, undefined := range []bool{false, true} {
 		req := compatibilityRequest(opts.Options{Driver: "pg", EmitNullAsUndefined: undefined})
 		req.Queries[0].Params[0].Column.NotNull = false
-		req.Queries = append(req.Queries, &plugin.Query{
+		req.Queries = append(req.Queries, &protocol.Query{
 			Name: "ListAuthors", Filename: "query.sql", Cmd: ":many", Text: "SELECT author_id FROM authors",
-			Columns: []*plugin.Column{{Name: "author_id", Type: &plugin.Identifier{Name: "int4"}, NotNull: true}},
+			Columns: []*protocol.Column{{Name: "author_id", Type: &protocol.Identifier{Name: "int4"}, NotNull: true}},
 		})
 		source := compatibilitySource(t, req)
 		if strings.Contains(source, "ListAuthorsArgs") || !strings.Contains(source, "): Promise<ListAuthorsRow[]>") {
@@ -184,7 +184,7 @@ func TestCompatibilityJSONTypes(t *testing.T) {
 			runtime = "deno"
 		}
 		req := compatibilityRequest(opts.Options{Runtime: runtime, Driver: driver})
-		req.Queries[0].Columns = []*plugin.Column{{Name: "json_data", Type: &plugin.Identifier{Name: "json"}}}
+		req.Queries[0].Columns = []*protocol.Column{{Name: "json_data", Type: &protocol.Identifier{Name: "json"}}}
 		source := compatibilitySource(t, req)
 		want := "jsonData: _sqlcImportJsonValue | null;"
 		if driver == "better-sqlite3" || driver == "@bonakodo/sqlite" {

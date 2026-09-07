@@ -50,7 +50,8 @@ func TestPlugins(t *testing.T) {
 	executable := filepath.Join(output, "plugin")
 	wasm := filepath.Join(output, "plugin.wasm")
 	run(t, root, []string{"CGO_ENABLED=0"}, goTool, "build", "-o", executable, "./plugin")
-	run(t, root, []string{"CGO_ENABLED=0", "GOOS=wasip1", "GOARCH=wasm"}, goTool, "build", "-o", wasm, "./plugin")
+	run(t, root, []string{"GO=" + goTool}, filepath.Join(root, "scripts", "build-wasm.sh"), wasm)
+	checkWire(t, root, executable, wasm)
 	wasmBytes, err := os.ReadFile(wasm)
 	if err != nil {
 		t.Fatal(err)
