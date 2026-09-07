@@ -1,0 +1,253 @@
+{
+  "settings": {
+    "version": "2",
+    "engine": "postgresql",
+    "schema": [
+      "schema.sql"
+    ],
+    "queries": [
+      "query.sql"
+    ]
+  },
+  "catalog": {
+    "defaultSchema": "public",
+    "schemas": [
+      {
+        "name": "public",
+        "tables": [
+          {
+            "rel": {
+              "name": "students"
+            },
+            "columns": [
+              {
+                "name": "id",
+                "notNull": true,
+                "length": -1,
+                "table": {
+                  "name": "students"
+                },
+                "type": {
+                  "schema": "pg_catalog",
+                  "name": "int4"
+                }
+              },
+              {
+                "name": "name",
+                "notNull": true,
+                "length": -1,
+                "table": {
+                  "name": "students"
+                },
+                "type": {
+                  "name": "text"
+                }
+              },
+              {
+                "name": "nickname",
+                "length": -1,
+                "table": {
+                  "name": "students"
+                },
+                "type": {
+                  "name": "text"
+                }
+              }
+            ]
+          },
+          {
+            "rel": {
+              "name": "test_scores"
+            },
+            "columns": [
+              {
+                "name": "id",
+                "notNull": true,
+                "length": -1,
+                "table": {
+                  "name": "test_scores"
+                },
+                "type": {
+                  "schema": "pg_catalog",
+                  "name": "int4"
+                }
+              },
+              {
+                "name": "student_id",
+                "notNull": true,
+                "length": -1,
+                "table": {
+                  "name": "test_scores"
+                },
+                "type": {
+                  "schema": "pg_catalog",
+                  "name": "int4"
+                }
+              },
+              {
+                "name": "score",
+                "notNull": true,
+                "length": -1,
+                "table": {
+                  "name": "test_scores"
+                },
+                "type": {
+                  "schema": "pg_catalog",
+                  "name": "int4"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "queries": [
+    {
+      "text": "SELECT students.id, students.name, students.nickname, test_scores.id, test_scores.student_id, test_scores.score\nFROM students INNER JOIN test_scores ON test_scores.student_id = students.id",
+      "name": "InnerScores",
+      "cmd": ":many",
+      "columns": [
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        },
+        {
+          "name": "test_scores",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "test_scores"
+          }
+        }
+      ],
+      "filename": "query.sql"
+    },
+    {
+      "text": "SELECT students.id, students.name, students.nickname, test_scores.id, test_scores.student_id, test_scores.score\nFROM students LEFT JOIN test_scores ON test_scores.student_id = students.id",
+      "name": "LeftScores",
+      "cmd": ":many",
+      "columns": [
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        },
+        {
+          "name": "test_scores",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "test_scores"
+          }
+        }
+      ],
+      "filename": "query.sql"
+    },
+    {
+      "text": "SELECT students.id, students.name, students.nickname, test_scores.id, test_scores.student_id, test_scores.score\nFROM students RIGHT JOIN test_scores ON test_scores.student_id = students.id",
+      "name": "RightScores",
+      "cmd": ":many",
+      "columns": [
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        },
+        {
+          "name": "test_scores",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "test_scores"
+          }
+        }
+      ],
+      "filename": "query.sql"
+    },
+    {
+      "text": "SELECT students.id, students.name, students.nickname, test_scores.id, test_scores.student_id, test_scores.score\nFROM students FULL JOIN test_scores ON test_scores.student_id = students.id",
+      "name": "FullScores",
+      "cmd": ":many",
+      "columns": [
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        },
+        {
+          "name": "test_scores",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "test_scores"
+          }
+        }
+      ],
+      "filename": "query.sql"
+    },
+    {
+      "text": "SELECT s.id, s.name, s.nickname, ts.id, ts.student_id, ts.score\nFROM students AS s LEFT JOIN test_scores AS ts ON ts.student_id = s.id",
+      "name": "AliasScores",
+      "cmd": ":many",
+      "columns": [
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        },
+        {
+          "name": "test_scores",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "test_scores"
+          }
+        }
+      ],
+      "filename": "query.sql"
+    },
+    {
+      "text": "SELECT s1.id, s1.name, s1.nickname, s2.id, s2.name, s2.nickname\nFROM students AS s1 LEFT JOIN students AS s2 ON s1.id = s2.id",
+      "name": "SelfJoin",
+      "cmd": ":many",
+      "columns": [
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        },
+        {
+          "name": "students",
+          "length": -1,
+          "type": {},
+          "embedTable": {
+            "name": "students"
+          }
+        }
+      ],
+      "filename": "query.sql"
+    }
+  ],
+  "sqlc_version": "v1.31.1",
+  "plugin_options": "eyJkcml2ZXIiOiJwZyJ9"
+}

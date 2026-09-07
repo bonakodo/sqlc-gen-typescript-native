@@ -1,0 +1,83 @@
+name: Go
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make check
+      - run: make build
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sqlc_test
+          POSTGRES_PASSWORD: sqlc_test
+          POSTGRES_DB: sqlc_test
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sqlc_test -d sqlc_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: sqlc_test_root
+          MYSQL_USER: sqlc_test
+          MYSQL_PASSWORD: sqlc_test
+          MYSQL_DATABASE: sqlc_test
+        ports: ['53306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -psqlc_test_root"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 'v2.9.6'
+      - name: Install stock sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: Install SQLite shared library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-0
+          sqlite_library=$(dpkg -L libsqlite3-0 | sed -n '/\/libsqlite3\.so\.0$/p')
+          test -f "$sqlite_library"
+          echo "DENO_SQLITE_PATH=$sqlite_library" >> "$GITHUB_ENV"
+      - run: make integration
+      - name: Test live PostgreSQL and MySQL drivers
+        run: scripts/test-server-live.sh
+      - run: make wasm
+      - name: Check the WASI example
+        working-directory: examples/deno-sqlite
+        run: |
+          deno task generate
+          deno task check
+          deno task start
+      - run: git diff --exit-code -- examples/deno-sqlite/db

@@ -1,0 +1,13 @@
+CREATE TABLE authors (
+  id INTEGER PRIMARY KEY AUTO_INCREMENT,
+  name TEXT NOT NULL,
+  bio TEXT,
+  score DOUBLE NOT NULL DEFAULT 0
+);
+CREATE TABLE records (
+  id BIGINT PRIMARY KEY,
+  active BOOLEAN NOT NULL,
+  created_at DATETIME NOT NULL,
+  payload BLOB,
+  document JSON
+);

@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Test and build WASM
+        run: make check
+      - name: Install stock sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: Check WASM generation with stock sqlc
+        working-directory: examples/deno-sqlite
+        run: |
+          sqlc generate
+          git diff --exit-code -- db
+      - name: Prepare checksum and release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd bin
+          sha256sum sqlc-gen-typescript-native.wasm > sqlc-gen-typescript-native.wasm.sha256
+          checksum=$(cut -d ' ' -f 1 sqlc-gen-typescript-native.wasm.sha256)
+          cat > release-notes.md <<EOF
+          Use this release in your sqlc configuration:
+
+          \`\`\`yaml
+          version: "2"
+          plugins:
+            - name: typescript
+              wasm:
+                url: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/sqlc-gen-typescript-native.wasm
+                sha256: ${checksum}
+          sql:
+            - engine: postgresql
+              schema: schema.sql
+              queries: query.sql
+              codegen:
+                - plugin: typescript
+                  out: db
+                  options:
+                    runtime: node
+                    driver: pg
+          \`\`\`
+
+          Run \`sqlc generate\`. No Go installation or local plugin build is needed.
+          EOF
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=()
+          if [[ "$TAG" == *-* ]]; then
+            flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$TAG" \
+            bin/sqlc-gen-typescript-native.wasm \
+            bin/sqlc-gen-typescript-native.wasm.sha256 \
+            --verify-tag \
+            --title "$TAG" \
+            --generate-notes \
+            --notes-file bin/release-notes.md \
+            "${flags[@]}"

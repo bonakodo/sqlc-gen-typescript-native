@@ -1,0 +1,4 @@
+/bin/
+/coverage.out
+/scripts/node_modules/
+/scripts/.integration/

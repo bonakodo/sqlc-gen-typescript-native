@@ -1,0 +1,14 @@
+{
+  "imports": { "@bonakodo/sqlite": "jsr:@bonakodo/sqlite@0.1.0" },
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true
+  },
+  "tasks": {
+    "generate": "sqlc generate",
+    "check": "deno check main.ts",
+    "start": "deno run --allow-read --allow-env=DENO_SQLITE_PATH --allow-ffi main.ts"
+  }
+}

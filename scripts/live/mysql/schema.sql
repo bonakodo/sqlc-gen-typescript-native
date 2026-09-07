@@ -1,0 +1,15 @@
+CREATE TABLE live_probes (
+  id INTEGER PRIMARY KEY AUTO_INCREMENT,
+  document JSON NOT NULL,
+  label TEXT NOT NULL
+);
+
+CREATE TABLE live_insert_ids (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  label TEXT NOT NULL
+);
+
+CREATE TABLE live_unsigned_insert_ids (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  label TEXT NOT NULL
+);

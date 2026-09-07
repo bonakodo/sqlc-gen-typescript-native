@@ -1,0 +1,20 @@
+{
+  "imports": {
+    "@bonakodo/sqlite": "jsr:@bonakodo/sqlite@0.1.0",
+    "@types/pg": "npm:@types/pg@8.23.1",
+    "@types/better-sqlite3": "npm:@types/better-sqlite3@9.6.0",
+    "pg": "npm:@types/pg@8.23.1",
+    "postgres": "npm:postgres@3.4.9",
+    "mysql2/promise": "npm:mysql2@3.24.3/promise",
+    "better-sqlite3": "npm:@types/better-sqlite3@9.6.0",
+    "postgres-interval": "npm:postgres-interval@1.2.0"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@bonakodo/sqlite@0.1.0": "0.1.0"
+  },
+  "jsr": {
+    "@bonakodo/sqlite@0.1.0": {
+      "integrity": "51dfb4121a2b52e8104d519d351e3dfd8941431901f0f5f259132793a3c9d7d2"
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@bonakodo/sqlite@0.1.0"
+    ]
+  }
+}

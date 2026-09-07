@@ -1,0 +1,17 @@
+version: '2'
+plugins:
+  - name: typescript
+    wasm:
+      # Run sqlc from this directory after building with make wasm.
+      url: file://../../bin/sqlc-gen-typescript-native.wasm
+sql:
+  - engine: sqlite
+    schema: schema.sql
+    queries: query.sql
+    codegen:
+      - plugin: typescript
+        out: db
+        options:
+          runtime: deno
+          driver: '@bonakodo/sqlite'
+          sqlite_type_mode: native

@@ -1,0 +1,327 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@bonakodo/sqlite@0.1.0": "0.1.0",
+    "npm:@types/better-sqlite3@9.6.0": "9.6.0",
+    "npm:@types/node@26.4.1": "26.4.1",
+    "npm:@types/pg@8.23.1": "8.23.1",
+    "npm:@typescript/native-preview@7.0.0-dev.20260707.2": "7.0.0-dev.20260707.2",
+    "npm:better-sqlite3@13.0.3": "13.0.3",
+    "npm:bun@1.4.2": "1.4.2",
+    "npm:mysql2@3.24.3": "3.24.3_@types+node@26.4.1",
+    "npm:pg@8.21.0": "8.21.0",
+    "npm:postgres-interval@1.2.0": "1.2.0",
+    "npm:postgres@3.4.9": "3.4.9"
+  },
+  "jsr": {
+    "@bonakodo/sqlite@0.1.0": {
+      "integrity": "51dfb4121a2b52e8104d519d351e3dfd8941431901f0f5f259132793a3c9d7d2"
+    }
+  },
+  "npm": {
+    "@oven/bun-darwin-aarch64@1.4.2": {
+      "integrity": "sha512-MXdZkP1featqxZ+/VTXWG1BVjM4OGBehVY2Q88EeUj/7L0UMeCGItmyPYTN+wxvlGJ6F66JEtzsw+GvQWewnag==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "@oven/bun-darwin-x64@1.4.2": {
+      "integrity": "sha512-gZTxZuLjkUhAWjTETu3tw0WhsEdNkJ64daj60ybhPf835a2yollV3yTkK9JozvzKPx4TRFzLSl8C+U525pxVbw==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "@oven/bun-freebsd-aarch64@1.4.2": {
+      "integrity": "sha512-SMNItMw1Z8QeeQVKnw8jA7xQNkeXdP+OPgin4Wi/QTx/B8RHHLnuZfqmFy7NtVeT2NF0kKYppW4WWd2CCYZjhQ==",
+      "os": ["freebsd"],
+      "cpu": ["arm64"]
+    },
+    "@oven/bun-freebsd-x64@1.4.2": {
+      "integrity": "sha512-THbPKXhO54N0DpFRKZNDZpQ7dpbX0bWASuARckAUS9wRtFIHsiY+uULXJvxJGo2YD1YewvXQ4G8Fj7XT5oBCiw==",
+      "os": ["freebsd"],
+      "cpu": ["x64"]
+    },
+    "@oven/bun-linux-aarch64-android@1.4.2": {
+      "integrity": "sha512-3mZKO2rhsNgbAUtAHC1UKUlF2zTxFraDZT/Elv8wzyH0fJL9h+Iv3TgB9lO63w89PRn3eFe+NRA1bhVgikKNPQ==",
+      "os": ["android"],
+      "cpu": ["arm64"]
+    },
+    "@oven/bun-linux-aarch64-musl@1.4.2": {
+      "integrity": "sha512-+Sm6y+lSiSFBOtXmnekp5Q6n1tUKlyv71FCPWBc61Cgb14T5eBs8SN/nh4MUCOKzONkI3O+as3MGUgikS4aCBQ==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@oven/bun-linux-aarch64@1.4.2": {
+      "integrity": "sha512-3BBP9ovJ2RGHFH6Ae1CAtxNtG1+YY6GD6rmYbsUosoAk9+OEl6zeDQ/k4fBkc6dYOJCtWnx8hUxzNzQATSmvYQ==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@oven/bun-linux-x64-android@1.4.2": {
+      "integrity": "sha512-6HC5tzcC79113n2IHCTJMWv+HsQImv4ZFEK2XpYLxY6HbT8tM4cUM2Zv1bHZBQsS3jv/zYBamDJ1UX7If0d5tw==",
+      "os": ["android"],
+      "cpu": ["x64"]
+    },
+    "@oven/bun-linux-x64-musl@1.4.2": {
+      "integrity": "sha512-vVTKUg1bnPhRP/Hp73jIVoFh2vPFNYEqYX0ERKfZBOQEEHitNAeukZzzuUDZS0SoDCIpuWUGSpd/CDMbjdR+Uw==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@oven/bun-linux-x64@1.4.2": {
+      "integrity": "sha512-9/E/UXOTpSo3YsV5g+FhtTd/qTpiWoKuxS12cqtuYA1ssu9fRAoPQnipFgGyck3tWO63iUdxBiygq+kELFawng==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@oven/bun-windows-aarch64@1.4.2": {
+      "integrity": "sha512-8EJ1ST7339WJE3poPW5nBgVW/lWf9HBz4W27ZUNhburKmcBLOByPyE6DP9fHD8FQGm5c+ilUN2hX1mrW0jxq9Q==",
+      "os": ["win32"],
+      "cpu": ["arm64"]
+    },
+    "@oven/bun-windows-x64@1.4.2": {
+      "integrity": "sha512-+bN6OuVld/9diT/RLSXSW7JE6CvNE3gL9XsAEjULi1nUsXd6DNO6GuA9jNdNb3r8PdJFnYHr5aypNV1Oj3Rd9g==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
+    "@types/better-sqlite3@9.6.0": {
+      "integrity": "sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==",
+      "dependencies": [
+        "@types/node"
+      ]
+    },
+    "@types/node@26.4.1": {
+      "integrity": "sha512-k97ENvZWtvA6yqz5/FS6a7duDgOPEeOQOc2iKS/nY6mX6qJUKtLnWzQS+Xj6tXweyj6ZcTAK2Qecetnvi9nCLA==",
+      "dependencies": [
+        "undici-types"
+      ]
+    },
+    "@types/pg@8.23.1": {
+      "integrity": "sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==",
+      "dependencies": [
+        "@types/node",
+        "pg-protocol",
+        "pg-types"
+      ]
+    },
+    "@typescript/native-preview-darwin-arm64@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-wny2pgKjGbiZtnOIHVa3tXC1UfDqxNEFzyPGmiqybedG8hipG2Nfp0l5UxbaKCjkLacUpH/W5bP2hBOMVhCOzg==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "@typescript/native-preview-darwin-x64@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-Afc7M5zOwo+GpfcYwz5Z8HMB2tPVsui7nNIqEuuFB73MPdVqNn/Wmpe4tP4MRri0AtJnJknoHBaTJ/VDAp/Jhw==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "@typescript/native-preview-linux-arm64@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-iITBa2WjjTI5N9t5l7Z4KoOSI+2zBlhbvFzsD/f8qX8QoKjz/Y4DPyBDgezYi8nkqjjksbgSOJ3/ykzhwrB9cg==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@typescript/native-preview-linux-arm@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-hJm/UOqZTr9FHmR7uNm8VGX4oKtfWk0Jem0zPeJFNC8ckGUfSBueyiEYMZB+XmRc1aG4x1E46y3CplP4CLHvGQ==",
+      "os": ["linux"],
+      "cpu": ["arm"]
+    },
+    "@typescript/native-preview-linux-x64@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-du0dzi6y97Po5vDNdPJTyyijHCpaS22JLRnKZEJXBDaO9gCIymOv/5QQokFRuOlQm0bWl3i9PF4OVdGP6uAOQA==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@typescript/native-preview-win32-arm64@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-SsAwfhyHJ1akgBc+99z4+hwdbHsdWaKB8EwCNIMA6JfSLMeUjffrYvxu+vfMyxVtOVOz7RrRXRoiDiu4a2sCtg==",
+      "os": ["win32"],
+      "cpu": ["arm64"]
+    },
+    "@typescript/native-preview-win32-x64@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-DL4u27stv0fo71sVhOzHSwE+YMZsbBijVI+kg5dLDLilSH79WFTJ8RSQ46vJrCMt+Gjlv/JOZP1PuLJDfioYeQ==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
+    "@typescript/native-preview@7.0.0-dev.20260707.2": {
+      "integrity": "sha512-oUGp+Rep/hqMhPunyinsALUwSlzHINSxitifPiSaeqoKOKD2OlR9NE3TaPqwsl4NlGslsOSUXI1JotWQzpYCPg==",
+      "optionalDependencies": [
+        "@typescript/native-preview-darwin-arm64",
+        "@typescript/native-preview-darwin-x64",
+        "@typescript/native-preview-linux-arm",
+        "@typescript/native-preview-linux-arm64",
+        "@typescript/native-preview-linux-x64",
+        "@typescript/native-preview-win32-arm64",
+        "@typescript/native-preview-win32-x64"
+      ],
+      "bin": true
+    },
+    "aws-ssl-profiles@1.1.2": {
+      "integrity": "sha512-NZKeq9AfyQvEeNlN0zSYAaWrmBffJh3IELMZfRpJVWgrpEbtEpnjvzqBPf+mxoI287JohRDoa+/nsfqqiZmF6g=="
+    },
+    "better-sqlite3@13.0.3": {
+      "integrity": "sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==",
+      "dependencies": [
+        "node-addon-api"
+      ]
+    },
+    "bun@1.4.2": {
+      "integrity": "sha512-TrSXo6HJfIEaczpb3kjX82I2pL47vK1QUNmHRCUdz9IzaOwa9lzOXSWwu2l18YHE3sNfGRapVLd4nNm+22vVVA==",
+      "optionalDependencies": [
+        "@oven/bun-darwin-aarch64",
+        "@oven/bun-darwin-x64",
+        "@oven/bun-freebsd-aarch64",
+        "@oven/bun-freebsd-x64",
+        "@oven/bun-linux-aarch64",
+        "@oven/bun-linux-aarch64-android",
+        "@oven/bun-linux-aarch64-musl",
+        "@oven/bun-linux-x64",
+        "@oven/bun-linux-x64-android",
+        "@oven/bun-linux-x64-musl",
+        "@oven/bun-windows-aarch64",
+        "@oven/bun-windows-x64"
+      ],
+      "os": ["darwin", "linux", "android", "freebsd", "win32"],
+      "cpu": ["arm64", "x64"],
+      "scripts": true,
+      "bin": true
+    },
+    "generate-function@2.3.1": {
+      "integrity": "sha512-eeB5GfMNeevm/GRYq20ShmsaGcmI81kIX2K9XQx5miC8KdHaC6Jm0qQ8ZNeGOi7wYB8OsdxKs+Y2oVuTFuVwKQ==",
+      "dependencies": [
+        "is-property"
+      ]
+    },
+    "iconv-lite@0.7.3": {
+      "integrity": "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==",
+      "dependencies": [
+        "safer-buffer"
+      ]
+    },
+    "is-property@1.0.2": {
+      "integrity": "sha512-Ks/IoX00TtClbGQr4TWXemAnktAQvYB7HzcCxDGqEZU6oCmb2INHuOoKxbtR+HFkmYWBKv/dOZtGRiAjDhj92g=="
+    },
+    "long@5.3.2": {
+      "integrity": "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="
+    },
+    "lru.min@1.1.5": {
+      "integrity": "sha512-5J9ysMYUpYIg9RF2vJpy9SinEmSviFSe0GyPpCQ4L5QSkLAgeLXlTAOu2ZwWUU5m+0SBl6gUU1R1ZQB3aKypfA=="
+    },
+    "mysql2@3.24.3_@types+node@26.4.1": {
+      "integrity": "sha512-OKfWHkMAg9v06neq8FmSyhbxPQKABN9PAW5G9/bDTXzJBO5xXtkKL0V27vju7HQWk9UD4Od5BZsvCtBTB1CPEw==",
+      "dependencies": [
+        "@types/node",
+        "aws-ssl-profiles",
+        "generate-function",
+        "iconv-lite",
+        "long",
+        "lru.min",
+        "named-placeholders",
+        "sql-escaper"
+      ]
+    },
+    "named-placeholders@1.1.6": {
+      "integrity": "sha512-Tz09sEL2EEuv5fFowm419c1+a/jSMiBjI9gHxVLrVdbUkkNUUfjsVYs9pVZu5oCon/kmRh9TfLEObFtkVxmY0w==",
+      "dependencies": [
+        "lru.min"
+      ]
+    },
+    "node-addon-api@8.9.2": {
+      "integrity": "sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg=="
+    },
+    "pg-cloudflare@1.4.0": {
+      "integrity": "sha512-Vo7z/6rrQYxpNRylp4Tlob2elzbh+N/MOQbxFVWCxS7oEx6jF53GTJFxK2WWpKuBRkmiin4Mt+xofFDjx09R0A=="
+    },
+    "pg-connection-string@2.14.0": {
+      "integrity": "sha512-XwWDGcLRGCXAR8F/AM5bG7Q+A3Wm2s6QeEjlOKZLlH3UYcguiqCWKyWXVag5TLTIjR7oOJUY8kcADaZgWPyLeg=="
+    },
+    "pg-int8@1.0.1": {
+      "integrity": "sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw=="
+    },
+    "pg-pool@3.14.0_pg@8.21.0": {
+      "integrity": "sha512-gKtPkFdQPU3DksooVLi9LsjZxrsBUZIpa+7aVx+LV5pNh0KzP4Zleud2po+ConrxbuXGBJ6Hfer6hdgpIBpBaw==",
+      "dependencies": [
+        "pg"
+      ]
+    },
+    "pg-protocol@1.16.0": {
+      "integrity": "sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg=="
+    },
+    "pg-types@2.2.0": {
+      "integrity": "sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==",
+      "dependencies": [
+        "pg-int8",
+        "postgres-array",
+        "postgres-bytea",
+        "postgres-date",
+        "postgres-interval"
+      ]
+    },
+    "pg@8.21.0": {
+      "integrity": "sha512-AUP1EYJuHraQGsVoCQVIcM7TEJVGtDzxWtGFZd8rds9d+CCXlU5Js1rYgfLNvxy9iJrpHjGrRjoi/3BT9fRyiA==",
+      "dependencies": [
+        "pg-connection-string",
+        "pg-pool",
+        "pg-protocol",
+        "pg-types",
+        "pgpass"
+      ],
+      "optionalDependencies": [
+        "pg-cloudflare"
+      ]
+    },
+    "pgpass@1.0.5": {
+      "integrity": "sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==",
+      "dependencies": [
+        "split2"
+      ]
+    },
+    "postgres-array@2.0.0": {
+      "integrity": "sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA=="
+    },
+    "postgres-bytea@1.0.1": {
+      "integrity": "sha512-5+5HqXnsZPE65IJZSMkZtURARZelel2oXUEO8rH83VS/hxH5vv1uHquPg5wZs8yMAfdv971IU+kcPUczi7NVBQ=="
+    },
+    "postgres-date@1.0.7": {
+      "integrity": "sha512-suDmjLVQg78nMK2UZ454hAG+OAW+HQPZ6n++TNDUX+L0+uUlLywnoxJKDou51Zm+zTCjrCl0Nq6J9C5hP9vK/Q=="
+    },
+    "postgres-interval@1.2.0": {
+      "integrity": "sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==",
+      "dependencies": [
+        "xtend"
+      ]
+    },
+    "postgres@3.4.9": {
+      "integrity": "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="
+    },
+    "safer-buffer@2.1.2": {
+      "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="
+    },
+    "split2@4.2.0": {
+      "integrity": "sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg=="
+    },
+    "sql-escaper@1.5.1": {
+      "integrity": "sha512-4toX5E1fQbBrpfXidaHnF0669nkAdETeIPTs2SUjxxD7RRIs9ICG4gtpmfc68JCEKehsdwLFqBu9VlQqZ1P1gg=="
+    },
+    "undici-types@8.3.0": {
+      "integrity": "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="
+    },
+    "xtend@4.0.2": {
+      "integrity": "sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@bonakodo/sqlite@0.1.0",
+      "npm:@types/better-sqlite3@9.6.0",
+      "npm:@types/pg@8.23.1",
+      "npm:mysql2@3.24.3",
+      "npm:postgres-interval@1.2.0",
+      "npm:postgres@3.4.9"
+    ],
+    "packageJson": {
+      "dependencies": [
+        "npm:@types/better-sqlite3@9.6.0",
+        "npm:@types/node@26.4.1",
+        "npm:@types/pg@8.23.1",
+        "npm:@typescript/native-preview@7.0.0-dev.20260707.2",
+        "npm:better-sqlite3@13.0.3",
+        "npm:bun@1.4.2",
+        "npm:mysql2@3.24.3",
+        "npm:pg@8.21.0",
+        "npm:postgres@3.4.9"
+      ]
+    }
+  }
+}
