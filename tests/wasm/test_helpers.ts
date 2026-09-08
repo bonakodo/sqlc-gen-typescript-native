@@ -84,6 +84,20 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// Component fixtures retain the reference printer's exact text. The complete
+// generator and integration suites exercise sharing; these guards trap if a
+// component accidentally enters that path without the full generation pass.
+export const legacyOutputHarness = `
+  (global $compact_active i32 (i32.const 0))
+  (global $compact_in_helper i32 (i32.const 0))
+  (func $compact_context (param i32 i32 i32 i32 i32) (result i32 i32) unreachable)
+  (func $compact_row_call (param i32 i32) (result i32 i32) unreachable)
+  (func $runtime_path (param i32 i32) (result i32 i32) unreachable)
+  (func $runtime_file_path (param i32) (result i32 i32) (i32.const 0) (i32.const 0))
+  (func $runtime_kind (param i32 i32) unreachable)
+  (func $runtime_external_sqlite_codec unreachable)
+`;
+
 // Use explicit tool overrides, then the pinned local toolchain, then PATH.
 export function wabt(name: "wat2wasm" | "wasm2wat"): string {
   const override = Deno.env.get(name.toUpperCase());

@@ -18,32 +18,116 @@ function field(number: number, value: string | Uint8Array): Buffer {
   return Buffer.concat([varint(number * 8 + 2), varint(bytes.length), bytes]);
 }
 
-// A query makes sqlc emit runtime support even with an empty table catalog.
+function integerField(number: number, value: number): Buffer {
+  return Buffer.concat([varint(number * 8), varint(value)]);
+}
+
+// Runtime unit tests exercise the union of these query needs. Keep the request
+// explicit so pruning stays enabled and missing dependencies remain visible.
 function request(engine: string, driver: string): Buffer {
   const schema = engine === "sqlite" ? "main" : "public";
-  const query = Buffer.concat([
-    field(1, "SELECT 'value' AS value"),
-    field(2, "GetValue"),
-    field(3, ":one"),
-    field(
-      4,
-      Buffer.concat([
-        field(1, "value"),
-        field(12, field(3, "text")),
-      ]),
-    ),
-    field(7, "query.sql"),
-  ]);
+  const queries: Buffer[] = [];
+  const queryOverrides: Record<string, unknown>[] = [];
+  function echo(name: string, type: string, array = false, slice = false) {
+    const column = Buffer.concat([
+      field(1, "value"),
+      integerField(3, 1),
+      integerField(7, 1),
+      field(12, field(3, type)),
+      ...(array ? [integerField(4, 1), integerField(17, 1)] : []),
+      ...(slice ? [integerField(13, 1)] : []),
+    ]);
+    const parameter = engine === "postgresql"
+      ? "$1"
+      : slice
+      ? "/*SLICE:value*/?"
+      : "?";
+    queries.push(Buffer.concat([
+      field(1, `SELECT ${parameter} AS value`),
+      field(2, name),
+      field(3, ":one"),
+      field(4, column),
+      field(5, Buffer.concat([integerField(1, 1), field(2, column)])),
+      field(7, "query.sql"),
+    ]));
+  }
+  const kinds = engine === "sqlite"
+    ? ["INTEGER", "REAL", "BOOLEAN", "DATE", "BLOB", "JSON", "TEXT", "custom"]
+    : engine === "postgresql"
+    ? [
+      "int4",
+      "text",
+      "bool",
+      "timestamptz",
+      "bytea",
+      "jsonb",
+      "point",
+      "circle",
+      "box",
+      "custom",
+    ]
+    : ["int", "bigint", "text", "bool", "datetime", "blob", "json", "custom"];
+  for (const [index, type] of kinds.entries()) {
+    echo(`Scalar${index}`, type);
+    if (engine === "postgresql") echo(`Array${index}`, type, true);
+  }
+  if (engine === "sqlite") {
+    for (
+      const [index, preset] of [
+        "safe_integer",
+        "epoch_milliseconds",
+        "sqlite_boolean",
+        "json_text",
+      ].entries()
+    ) {
+      const query = `Preset${index}`;
+      echo(query, preset === "json_text" ? "TEXT" : "INTEGER");
+      queryOverrides.push(
+        { query, column: "value", preset },
+        { query, parameter: "value", preset },
+      );
+    }
+  } else {
+    for (const array of engine === "postgresql" ? [false, true] : [false]) {
+      const query = array ? "CustomArray" : "CustomScalar";
+      echo(query, engine === "postgresql" ? "int4" : "int", array);
+      const custom = {
+        ts_type: "number",
+        codec: { path: "../test_codecs.ts", name: "valueCodec" },
+      };
+      queryOverrides.push(
+        { query, column: "value", ...custom },
+        { query, parameter: "value", ...custom },
+      );
+    }
+  }
+  if (engine !== "postgresql") echo("Slice", "INTEGER", false, true);
+  for (
+    const command of engine === "postgresql"
+      ? [":execresult"]
+      : [":execlastid", ":execresult"]
+  ) {
+    queries.push(Buffer.concat([
+      field(1, "INSERT INTO entries DEFAULT VALUES"),
+      field(2, command === ":execlastid" ? "InsertID" : "InsertResult"),
+      field(3, command),
+      field(7, "query.sql"),
+    ]));
+  }
   return Buffer.concat([
     field(1, field(2, engine)),
     field(2, Buffer.concat([field(2, schema), field(4, field(2, schema))])),
-    field(3, query),
+    ...queries.map((query) => field(3, query)),
     field(
       5,
       JSON.stringify({
         driver,
         runtime: "deno",
         ...(engine === "sqlite" ? { sqlite_type_mode: "native" } : {}),
+        ...(engine === "mysql"
+          ? { mysql2: { support_big_numbers: true, big_number_strings: false } }
+          : {}),
+        query_overrides: queryOverrides,
       }),
     ),
   ]);
@@ -81,7 +165,6 @@ const binary = await Deno.readFile(
 );
 const module = await WebAssembly.compile(binary);
 const output = new URL("./.generated/", import.meta.url);
-const supportFiles = ["codec_error.ts", "json.ts", "runtime.ts"];
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
 for (
@@ -89,6 +172,7 @@ for (
     ["sqlite", "sqlite", "@bonakodo/sqlite"],
     ["server", "postgresql", "pg"],
     ["postgres", "postgresql", "postgres"],
+    ["mysql", "mysql", "mysql2"],
   ] as const
 ) {
   const generated = await runPlugin(module, request(engine, driver));
@@ -104,8 +188,18 @@ for (
     files.set(filename, file[1]![1]);
   }
   const directory = new URL(`${name}/`, output);
+  await Deno.remove(directory, { recursive: true }).catch((error) => {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  });
   await Deno.mkdir(directory, { recursive: true });
-  for (const filename of supportFiles) {
+  for (
+    const filename of [
+      "codec_error.ts",
+      "json.ts",
+      "runtime_common.ts",
+      `runtime_${engine}.ts`,
+    ]
+  ) {
     const contents = files.get(filename);
     assert(contents, `missing generated support file: ${filename}`);
     // A malformed UTF-8 response must not become a silently repaired fixture.

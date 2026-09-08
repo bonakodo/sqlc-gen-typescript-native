@@ -22,7 +22,7 @@ import type {
   CreateAccountRow,
   GetAccountRow,
 } from "./.generated/enum-pg/wasm/query_sql.ts";
-import type { Database } from "./.generated/enum-pg/wasm/runtime.ts";
+import type { Database } from "./.generated/enum-pg/wasm/runtime_postgresql.ts";
 import * as TypesOnly from "./.generated/enum-types-only/wasm/index.ts";
 import type {
   Account as TypesOnlyAccount,

@@ -8,10 +8,13 @@ import {
   encodeCustom,
   encodeValue,
   integerResult,
+  parseArrayText,
+} from "./.generated/server/runtime_postgresql.ts";
+import {
+  decodeValue as decodeMysqlValue,
   mysqlInsertId,
   mysqlInsertIdBigInt,
-  parseArrayText,
-} from "./.generated/server/runtime.ts";
+} from "./.generated/mysql/runtime_mysql.ts";
 
 function equal(actual: unknown, expected: unknown): void {
   const json = (value: unknown) =>
@@ -108,8 +111,8 @@ Deno.test("server types follow driver defaults and retain large decimal strings"
   const value = "9223372036854775807";
   equal(decodeValue("string", value, false, false), value);
   equal(encodeValue("string", value), value);
-  equal(decodeValue("number-or-string", 3, false, false), 3);
-  equal(decodeValue("number-or-string", value, false, false), value);
+  equal(decodeMysqlValue("number-or-string", 3, false, false), 3);
+  equal(decodeMysqlValue("number-or-string", value, false, false), value);
   throws(() => decodeValue("string", 3, false, false));
   throws(() => decodeValue("number", "3", false, false));
   throws(() => decodeValue("date", "2026-09-07", false, false));

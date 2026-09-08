@@ -62,7 +62,7 @@
     (if (i32.eq (local.get $number) (local.get $last_number))
       (then (call $error (call $fmt1 (call $c_duplicate_param) (call $decimal_i32 (local.get $number))))))
     (local.set $last_number (local.get $number))
-    (local.set $field (call $resolve_query_type (local.get $m) (local.get $q) (call $child (local.get $param) (i32.const 2)) (i32.const 0) (i32.const 1)))
+    (local.set $field (call $resolve_query_type (call $compact_type_module (local.get $m)) (local.get $q) (call $child (local.get $param) (i32.const 2)) (i32.const 0) (i32.const 1)))
     (call $set_text (local.get $field) (i32.const 16) (call $name_take (local.get $names)
       (call $field_name (call $text (call $child (local.get $param) (i32.const 2)) (i32.const 1))
         (call $fmt1 (call $c_arg_number) (call $decimal_i32 (local.get $number))))))
@@ -71,7 +71,7 @@
       (else (i32.store offset=48 (local.get $plan) (local.get $field))))
     (local.set $tail (local.get $field)) (local.set $param (call $next (local.get $param))) (br $params)))
   (if (i32.le_u (local.get $cmd) (i32.const 2)) (then
-    (i32.store offset=52 (local.get $plan) (call $make_fields (local.get $m) (call $embed_columns (local.get $q)) (local.get $q) (i32.const 0)))))
+    (i32.store offset=52 (local.get $plan) (call $make_fields (call $compact_type_module (local.get $m)) (call $embed_columns (local.get $q)) (local.get $q) (i32.const 0)))))
   (call $plan_bindings (local.get $plan))
   (local.set $field (i32.load offset=48 (local.get $plan)))
   (block $all_used (loop $used
@@ -79,6 +79,7 @@
     (if (i32.eqz (call $binding_used (i32.load offset=56 (local.get $plan)) (i32.load offset=64 (local.get $field))))
       (then (call $error (call $fmt1 (call $c_unused_param) (call $decimal_i32 (i32.load offset=64 (local.get $field)))))))
     (local.set $field (call $next (local.get $field))) (br $used)))
+  (if (global.get $compact_active) (then (call $compact_plan (local.get $plan))))
   (local.get $plan))
 
 (func $database_type (param $m i32) (result i32 i32)
@@ -99,6 +100,9 @@
   (local $start i32) (local $count i32) (local $header i32) (local $header_n i32)
   (local.set $q (i32.load offset=8 (local.get $plan)))
   (local.set $field (i32.load offset=48 (local.get $plan)))
+  (if (i32.and (global.get $compact_active) (i32.ne (i32.load offset=72 (local.get $plan)) (i32.const 0)))
+    (then (call $compact_bindings (local.get $m) (local.get $plan)))
+    (else
   (block $encoded (loop $params
     (br_if $encoded (i32.eqz (local.get $field)))
     (call $argument_codec_context (local.get $m) (local.get $q) (local.get $field)) (local.set $ctx_n) (local.set $ctx)
@@ -116,7 +120,7 @@
     ;; Offset 72 caches the immutable variable spelling, 96 tracks PG dedup.
     (call $set_text (local.get $field) (i32.const 72) (call $fmt1 (call $c_param_variable) (call $decimal_i32 (i32.load offset=64 (local.get $field)))))
     (i32.store offset=96 (local.get $field) (i32.const 0))
-    (local.set $field (call $next (local.get $field))) (br $params)))
+    (local.set $field (call $next (local.get $field))) (br $params)))))
   (if (i32.eqz (i32.load offset=60 (local.get $plan))) (then
     (local.set $start (call $text_mark)) (call $text_byte (i32.const 91))
     (local.set $part (i32.load offset=56 (local.get $plan)))
@@ -178,8 +182,11 @@
       (call $get_text (local.get $plan) (i32.const 24))
       (call $template (call $concat (call $query_header (local.get $q)) (call $get_text (local.get $plan) (i32.const 64))))))
     (call $line (call $c_empty))))
+  (if (global.get $compact_active) (then (call $compact_interfaces (local.get $m) (local.get $plan)))
+    (else
   (if (i32.load offset=36 (local.get $plan)) (then (call $emit_interface (local.get $m) (call $get_text (local.get $plan) (i32.const 32)) (i32.load offset=48 (local.get $plan)) (i32.const 1))))
   (if (i32.load offset=44 (local.get $plan)) (then (call $emit_interface (local.get $m) (call $get_text (local.get $plan) (i32.const 40)) (i32.load offset=52 (local.get $plan)) (i32.const 0))))
+    ))
   (if (global.get $opt_types_only) (then return))
   (call $c_void) (local.set $result_n) (local.set $result)
   (if (i32.eq (local.get $cmd) (i32.const 1)) (then
@@ -213,5 +220,6 @@
       (then (call $fmt1 (call $c_args_decl) (call $get_text (local.get $plan) (i32.const 32)))) (else (call $c_empty)))
     (local.get $result) (local.get $result_n)))
   (call $indent)
+  (if (global.get $compact_active) (then (call $compact_query_context (local.get $m) (local.get $plan))))
   (call $emit_driver_query (local.get $m) (local.get $plan) (call $emit_bindings (local.get $m) (local.get $plan)))
   (call $dedent) (call $line (call $c_close_brace)) (call $line (call $c_empty)))

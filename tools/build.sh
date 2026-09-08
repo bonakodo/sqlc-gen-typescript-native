@@ -68,7 +68,7 @@ cat "$wat_repo/src/args-imports.wat" "$wat_repo/src/core.wat" "$wat_stage/assets
 for wat_fragment in \
   unicode inflection-data text protocol json options overrides typeexpr bindings \
   types-data types format output state catalog paths module drivers embed query \
-  factory runtime generator entrypoint; do
+  factory runtime compact generator entrypoint; do
   printf '\n' >> "$wat_stage/base.wat"
   cat "$wat_repo/src/$wat_fragment.wat" >> "$wat_stage/base.wat"
 done
