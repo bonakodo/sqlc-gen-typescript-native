@@ -1,7 +1,12 @@
 import { generateAssets } from "../../tools/assets.ts";
 import type { DriverField } from "./fixture_types.ts";
 import { Buffer } from "node:buffer";
-import { command, type Pair, wabt } from "./test_helpers.ts";
+import {
+  command,
+  legacyOutputHarness,
+  type Pair,
+  wabt,
+} from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
@@ -65,7 +70,9 @@ Deno.test("WAT drivers", async () => {
     );
     await Deno.writeTextFile(
       join(directory, "test.wat"),
-      `(module\n${core}\n${assets}\n${fragments.join("\n")}
+      `(module\n${core}\n${assets}\n${legacyOutputHarness}\n${
+        fragments.join("\n")
+      }
     (export "driver" (func $emit_driver_query))(export "options" (func $options_parse))
     (export "record" (func $work_record))(export "module" (func $module_new))(export "reserve" (func $reserve))
     (export "engine" (global $gen_engine))(export "work" (global $work_cursor))(export "text" (global $txt_cursor))

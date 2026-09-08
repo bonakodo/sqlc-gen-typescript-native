@@ -34,14 +34,24 @@ these fixtures as independent regression checks. Tests never compile Go or
 regenerate expected results from the candidate WASM. Add new cases with explicit
 expected behavior, and review fixture changes as code changes.
 
-The runtime-template merge has one narrow exception to historical output text.
-`runtime_migration.ts` recognizes seven reviewed old `runtime.ts` hashes and
-replaces only that expected file with the merged template's selected source and
-an explicit driver preamble. The selector is independent of the WAT fragment
-table. Original fixture hashes still pass before migration, and all other files,
-their order, diagnostics, and protobuf encoding remain exact. Unknown old
-runtime hashes fail. Runtime behavior tests and generated-code integration
-checks cover the merged support code itself.
+`compact-output.json.gz` records reviewed success-output changes for shared query
+types, encoders, row decoders and metadata, plus common and selected engine
+runtime files. `runtime_migration.ts` checks each original response hash before
+selecting a replacement, checks its hash, and rejects unknown old runtime
+responses. Every checked-in replacement must have coverage. Raw and optimized
+WASM still match the same complete expected response bytes. Requests, error
+statuses and diagnostics keep their original fixtures.
+
+The migration also audits the old and current output independently of the
+generator. It expands inherited shared interfaces before comparing public field
+names, types and nullability; resolves changed import aliases; compares query
+function signatures, complete factories with inferred return types, SQL literals
+and user comments; and checks local import targets. Synthetic tests require this
+audit to reject type, field, SQL, comment and missing-import regressions, including
+quoted names and nested output paths. This audit does not replace behavior tests
+or exact snapshots. Review fixture changes alongside generated-code integration
+and runtime behavior tests. Never refresh fixtures in a test run or use candidate
+output as its own expected result.
 
 For a focused adversarial run, pass a binary path and a case-name substring:
 
@@ -51,7 +61,8 @@ deno test --allow-read --allow-env tests/wasm/adversarial_test.ts -- bin/sqlc-ge
 
 The optional `ORACLE=/absolute/path/to/reference-plugin` setting compares
 selected small adversarial cases against a separately supplied executable. It
-needs `--allow-run` and does not build or fetch that reference. Its responses
-use the same reviewed runtime migration as the frozen corpus. Normal tests use
-only the checked-in fixtures and local WASM binaries. Stock-sqlc and generated
-TypeScript checks live in `tests/integration/`.
+needs `--allow-run` and does not build or fetch that reference. Error responses
+remain byte-for-byte comparisons; success responses use the independent SQL and
+public-type audit because the old generator emits different private code. Normal
+tests use only checked-in fixtures and local WASM binaries. Stock-sqlc and
+generated TypeScript checks live in `tests/integration/`.

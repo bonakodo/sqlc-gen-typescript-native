@@ -2,11 +2,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as pg from "./.generated/node-pg/wasm/query_sql.ts";
-import type { Database as PgDatabase } from "./.generated/node-pg/wasm/runtime.ts";
+import type { Database as PgDatabase } from "./.generated/node-pg/wasm/runtime_postgresql.ts";
 import * as postgres from "./.generated/node-postgres/wasm/query_sql.ts";
-import type { Database as PostgresDatabase } from "./.generated/node-postgres/wasm/runtime.ts";
+import type { Database as PostgresDatabase } from "./.generated/node-postgres/wasm/runtime_postgresql.ts";
 import * as mysql from "./.generated/node-mysql2/wasm/query_sql.ts";
-import type { Database as MySQLDatabase } from "./.generated/node-mysql2/wasm/runtime.ts";
+import type { Database as MySQLDatabase } from "./.generated/node-mysql2/wasm/runtime_mysql.ts";
 import * as mysqlStrings from "./.generated/mysql-strings/wasm/query_sql.ts";
 import * as mysqlMixed from "./.generated/mysql-mixed/wasm/query_sql.ts";
 import { QueryCodecError as PostgresCodecError } from "./.generated/node-postgres/wasm/codec_error.ts";

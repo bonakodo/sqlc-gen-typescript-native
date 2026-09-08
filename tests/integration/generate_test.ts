@@ -221,7 +221,9 @@ Deno.test("stock sqlc generates all driver and option fixtures", async (t) => {
       assert(generated["models.ts"]);
       assert(generated["index.ts"]);
       if (tc.extra?.types_only) {
-        assert(!generated["runtime.ts"]);
+        assert(!Object.keys(generated).some((name) => /^runtime_/.test(name)));
+        assert(!generated["query_helpers.ts"]?.includes("export function"));
+        assert(!generated["query_helpers.ts"]?.includes("./runtime_"));
         assert(!generated["query_sql.ts"]?.includes("export function"));
       }
       if (tc.name.startsWith("enum-")) assert(generated["enums.ts"]);

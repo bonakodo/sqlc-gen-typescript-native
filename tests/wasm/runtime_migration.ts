@@ -1,44 +1,14 @@
-// The historical corpus stays immutable. Only its seven known runtime bodies
-// change for the source-template merge; every other response byte remains exact.
+// Intentional output changes have separate reviewed fixtures. Tests never
+// derive expectations from the candidate or edit the historical Go corpus.
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { compactSupportText } from "../../tools/assets.ts";
+import { gunzipSync } from "node:zlib";
+import { posix } from "node:path";
 
-interface Variant {
-  driver: number;
-  deno?: boolean;
-}
-
-const variants: Readonly<Record<string, Variant>> = {
-  d5d2b9ef414bc271f45dd94bf501828827c9c23342ccbf267191d7c372528fcc: {
-    driver: 1,
-    deno: true,
-  },
-  "1bc90a1dde2c7e7e5584253d795cc948613ffd52f5c8a937355d245403db58dd": {
-    driver: 5,
-  },
-  "3e629321f9cacea80a17768df7875b3c3126ce8dd99bfe2ecaff5ef608b326e4": {
-    driver: 1,
-  },
-  "5c8237312cb1c1a7f268130f681f3bc632717a6f49666b5a6ca56ca193c60295": {
-    driver: 4,
-    deno: true,
-  },
-  abf1f1ba518d1b15d60ec1cf8d7a798993381f90d89d70b068c6ab2ab950c059: {
-    driver: 3,
-  },
-  "4a8f3de101484f6baec51e4843b934762b5eb2497f86fbbcffb395a350ceda6e": {
-    driver: 2,
-  },
-  fa200bb19368504f01ed5c5c478269f478e0f498d558463d7ffcba53b0c16a63: {
-    driver: 4,
-  },
-};
 const hash = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 type Field = readonly [number, Buffer];
-
 function fields(bytes: Buffer): Field[] {
   let cursor = 0;
   const uint = () => {
@@ -83,7 +53,8 @@ const encode = (data: readonly Field[]) =>
       Buffer.concat([varint(number * 8 + 2), varint(bytes.length), bytes])
     ),
   );
-function responseFiles(response: Buffer): Field[][] {
+export function responseFiles(response: Buffer): Map<string, string> {
+  const result = new Map<string, string>();
   const files = fields(response).map(([number, bytes]) => {
     assert.equal(number, 1, "unexpected frozen response field");
     const file = fields(bytes);
@@ -93,160 +64,451 @@ function responseFiles(response: Buffer): Field[][] {
       "unexpected frozen File fields",
     );
     assert.ok(encode(file).equals(bytes), "noncanonical frozen File encoding");
-    return file;
+    const name = file[0][1].toString();
+    assert.ok(!result.has(name), `duplicate generated file ${name}`);
+    result.set(name, file[1][1].toString());
+    return [1, encode(file)] as const;
   });
   assert.ok(
-    encode(files.map((file) => [1, encode(file)])).equals(response),
+    encode(files).equals(response),
     "noncanonical frozen response encoding",
   );
-  return files;
+  return result;
 }
 
-// Deliberately independent of assets.ts's fragment masks and the WAT table walk.
-function selectedSource(source: string, driver: number): string {
-  const enabled: Record<string, boolean> = {
-    sqlite: driver === 4 || driver === 5,
-    server: driver >= 1 && driver <= 3,
-    bonakodo: driver === 5,
-    "better-sqlite3": driver === 4,
+// A scanner for the generated grammar, independent of WAT templates. Keep
+// strings/templates/comments intact: quoted braces cannot change boundaries.
+interface Token {
+  text: string;
+  kind: "word" | "string" | "template" | "punct" | "comment";
+}
+function tokens(source: string): Token[] {
+  const result: Token[] = [];
+  for (let i = 0; i < source.length;) {
+    const start = i, c = source[i++];
+    if (/\s/.test(c)) continue;
+    if (c === "'" || c === '"' || c === "`") {
+      let ended = false;
+      while (i < source.length) {
+        const next = source[i++];
+        if (next === "\\") i++;
+        else if (next === c) {
+          ended = true;
+          break;
+        }
+      }
+      assert.ok(ended, "unterminated generated string");
+      result.push({
+        text: source.slice(start, i),
+        kind: c === "`" ? "template" : "string",
+      });
+    } else if (c === "/" && source[i] === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+      result.push({ text: source.slice(start, i), kind: "comment" });
+    } else if (c === "/" && source[i] === "*") {
+      const end = source.indexOf("*/", ++i);
+      assert.ok(end >= 0, "unterminated generated comment");
+      i = end + 2;
+      result.push({ text: source.slice(start, i), kind: "comment" });
+    } else if (/[\p{ID_Start}\p{ID_Continue}$]/u.test(c)) {
+      while (i < source.length && /[\p{ID_Continue}$]/u.test(source[i])) i++;
+      result.push({ text: source.slice(start, i), kind: "word" });
+    } else result.push({ text: c, kind: "punct" });
+  }
+  return result;
+}
+const supportFile = (name: string) =>
+  /^(?:runtime(?:_(?:common|postgresql|mysql|sqlite))?|codec_error|query_helpers)\.ts$/
+    .test(name);
+const modulePath = (file: string, path: string) =>
+  path.startsWith(".")
+    ? posix.normalize(posix.join(posix.dirname(file), path))
+    : path;
+const typePath = (path: string) =>
+  path.replace(
+    /(^|\/)runtime_(?:common|postgresql|mysql|sqlite)\.ts$/,
+    "$1runtime.ts",
+  );
+interface Import {
+  path: string;
+  name: string;
+}
+interface Source {
+  file: string;
+  allTokens: Token[];
+  tokens: Token[];
+  imports: Map<string, Import>;
+  declarations: Token[][];
+}
+function parse(file: string, text: string): Source {
+  const allTokens = tokens(text);
+  const all = allTokens.filter((token) => token.kind !== "comment");
+  const result: Source = {
+    file,
+    allTokens,
+    tokens: all,
+    imports: new Map(),
+    declarations: [],
   };
-  let section: string | undefined;
-  const output: string[] = [];
-  for (
-    const line of compactSupportText(source).match(/[^\n]*\n|[^\n]+$/g) ?? []
-  ) {
-    const directive = line.trim();
-    if (directive.startsWith("// @if ")) {
-      assert.equal(section, undefined, "nested runtime section");
-      section = directive.slice(7);
-      assert.ok(Object.hasOwn(enabled, section), "unknown runtime section");
-    } else if (directive === "// @endif") {
-      assert.notEqual(section, undefined, "unmatched runtime section end");
-      section = undefined;
-    } else if (section === undefined || enabled[section]) output.push(line);
+  for (let i = 0; i < all.length;) {
+    const start = i;
+    let depth = 0;
+    do {
+      const value = all[i++].text;
+      if (value === "{") depth++;
+      if (value === "}") depth--;
+      if (depth === 0 && (value === ";" || value === "}")) break;
+    } while (i < all.length);
+    const declaration = all.slice(start, i);
+    if (declaration[0].text === "import") {
+      const from = declaration.findIndex((token) => token.text === "from");
+      // Imports finish after their braces; continue through the semicolon.
+      if (from < 0) {
+        while (i < all.length && all[i - 1].text !== ";") {
+          declaration.push(all[i++]);
+        }
+      }
+      const fromAt = declaration.findIndex((token) => token.text === "from");
+      assert.ok(fromAt >= 0, `unsupported generated import in ${file}`);
+      const path = modulePath(file, JSON.parse(declaration[fromAt + 1].text));
+      let at = declaration.findIndex((token) => token.text === "{") + 1;
+      assert.ok(at > 0, `unsupported generated import in ${file}`);
+      while (declaration[at].text !== "}") {
+        if (declaration[at].text === "type") at++;
+        const name = declaration[at++].text;
+        let alias = name;
+        if (declaration[at].text === "as") {
+          at++;
+          alias = declaration[at++].text;
+        }
+        result.imports.set(alias, { path, name });
+        if (declaration[at].text === ",") at++;
+      }
+    } else {
+      if (
+        declaration[0].text === "export" &&
+        (declaration[1]?.text === "{" ||
+          (declaration[1]?.text === "type" && declaration[2]?.text === "{"))
+      ) {
+        while (i < all.length && all[i - 1].text !== ";") {
+          declaration.push(all[i++]);
+        }
+      }
+      result.declarations.push(declaration);
+    }
   }
-  assert.equal(section, undefined, "unclosed runtime section");
-  return output.join("");
+  return result;
 }
-function expectedRuntime(source: string, { driver, deno }: Variant): Buffer {
-  let preamble = "// Code generated by sqlc. DO NOT EDIT.\n\n";
-  switch (driver) {
-    case 1:
-      if (deno) preamble += '// @deno-types="@types/pg"\n';
-      preamble +=
-        'import type { QueryArrayConfig, QueryArrayResult } from "pg";\n\n' +
-        "export interface Database {\n  query(config: QueryArrayConfig): Promise<QueryArrayResult>;\n}\n\n";
-      break;
-    case 2:
-      preamble += 'import type { Sql } from "postgres";\n\n' +
-        'export type Database = Pick<Sql, "unsafe">;\n' +
-        'export type DriverParameters = NonNullable<Parameters<Sql["unsafe"]>[1]>;\n\n';
-      break;
-    case 3:
-      preamble += 'import type { Connection } from "mysql2/promise";\n\n' +
-        'export type Database = Pick<Connection, "execute">;\n\n';
-      break;
-    case 4:
-      if (deno) preamble += '// @deno-types="@types/better-sqlite3"\n';
-      preamble +=
-        'import type { Database } from "better-sqlite3";\nexport type { Database };\n';
-      break;
-    case 5:
-      preamble +=
-        'import type { Database } from "@bonakodo/sqlite";\nexport type { Database };\n\n';
-      break;
-    default:
-      throw new Error("unknown runtime driver");
+function fieldComments(
+  sources: Map<string, Source>,
+  source: Source,
+  name: string,
+  seen = new Set<string>(),
+): string[] {
+  const key = `${source.file}:${name}`;
+  assert.ok(!seen.has(key), `cyclic generated interface ${key}`);
+  seen.add(key);
+  const imported = source.imports.get(name);
+  if (imported && sources.has(imported.path)) {
+    return fieldComments(
+      sources,
+      sources.get(imported.path)!,
+      imported.name,
+      seen,
+    );
   }
-  if (driver <= 3) {
-    preamble += `const jsonDriver: string = "${
-      driver === 2 ? "postgres" : "generic"
-    }";\n\n`;
-  }
-  const result = preamble + selectedSource(source, driver);
-  return Buffer.from(result.endsWith("\n") ? result : result + "\n");
-}
-function assertBackend(contents: Buffer, { driver }: Variant) {
-  const text = contents.toString();
-  assert.doesNotMatch(
-    text,
-    /^\s*\/\/ @(?:if|endif)\b/m,
-    "runtime leaked section markers",
+  const all = source.allTokens;
+  const at = all.findIndex((token, index) =>
+    (token.text === "interface" || token.text === "type") &&
+    all[index + 1]?.text === name
   );
-  if (driver >= 4) {
-    assert.doesNotMatch(
-      text,
-      /from "node:buffer"|function parseArrayText|function mysqlInsertId|const jsonDriver:/,
-      "SQLite output includes server support",
+  assert.ok(at >= 0, `missing shared interface ${key}`);
+  let open = at + 2;
+  const inherited: string[] = [];
+  if (all[open]?.text === "extends") {
+    while (all[++open]?.text !== "{") {
+      if (all[open].text !== ",") {
+        inherited.push(
+          ...fieldComments(sources, source, all[open].text, new Set(seen)),
+        );
+      }
+    }
+  } else while (all[open]?.text !== "{") open++;
+  let depth = 1;
+  const result = [...inherited];
+  for (let i = open + 1; depth > 0 && i < all.length; i++) {
+    if (all[i].kind === "comment") result.push(all[i].text);
+    if (all[i].text === "{") depth++;
+    if (all[i].text === "}") depth--;
+  }
+  return result;
+}
+function otherComments(source: Source): string[] {
+  const all = source.allTokens, result: string[] = [];
+  for (let i = 0; i < all.length; i++) {
+    if (all[i].text === "interface") {
+      while (i < all.length && all[i].text !== "{") i++;
+      let depth = 1;
+      while (depth > 0 && ++i < all.length) {
+        if (all[i].text === "{") depth++;
+        if (all[i].text === "}") depth--;
+      }
+    } else if (
+      all[i].kind === "comment" && !all[i].text.startsWith("// Code generated")
+    ) result.push(all[i].text);
+  }
+  return result;
+}
+function canonical(source: Source, values: Token[]): string[] {
+  return values.map((token, index) => {
+    const imported = token.kind === "word" && source.imports.get(token.text);
+    return imported && values[index + 1]?.text !== ":"
+      ? `import(${typePath(imported.path)},${imported.name})`
+      : token.text;
+  });
+}
+function interfaceBody(
+  sources: Map<string, Source>,
+  source: Source,
+  name: string,
+  seen = new Set<string>(),
+): string[] {
+  const key = `${source.file}:${name}`;
+  assert.ok(!seen.has(key), `cyclic generated interface ${key}`);
+  seen.add(key);
+  const imported = source.imports.get(name);
+  if (imported && sources.has(imported.path)) {
+    return interfaceBody(
+      sources,
+      sources.get(imported.path)!,
+      imported.name,
+      seen,
     );
-    assert.match(text, /function lastInsertId\(/);
-    assert.doesNotMatch(
-      text,
-      driver === 4 ? /@bonakodo\/sqlite/ : /better-sqlite3/,
-      "SQLite output imports the other driver",
-    );
-  } else {
-    assert.doesNotMatch(
-      text,
-      /@bonakodo\/sqlite|better-sqlite3|function dateValue|function lastInsertId|const minInt64/,
-      "server output includes SQLite support",
-    );
-    assert.match(text, /function parseArrayText\(/);
-    assert.match(text, /function mysqlInsertId\(/);
+  }
+  const declaration = source.declarations.find((decl) => {
+    const at = decl[0].text === "export" ? 1 : 0;
+    return (decl[at]?.text === "interface" || decl[at]?.text === "type") &&
+      decl[at + 1]?.text === name;
+  });
+  assert.ok(declaration, `missing shared interface ${key}`);
+  const open = declaration.findIndex((token) => token.text === "{");
+  assert.ok(open >= 0, `shared type is not an object: ${key}`);
+  const close = declaration.findLastIndex((token) => token.text === "}");
+  const body: string[] = [];
+  const extension = declaration.findIndex((token) => token.text === "extends");
+  if (extension >= 0) {
+    for (const token of declaration.slice(extension + 1, open)) {
+      if (token.text === ",") continue;
+      assert.equal(
+        token.kind,
+        "word",
+        `unsupported shared inheritance: ${key}`,
+      );
+      body.push(...interfaceBody(sources, source, token.text, new Set(seen)));
+    }
+  }
+  body.push(...canonical(source, declaration.slice(open + 1, close)));
+  return body;
+}
+function publicAPI(sources: Map<string, Source>, source: Source): string[][] {
+  return source.declarations.filter((declaration) =>
+    declaration[0].text === "export"
+  ).map((declaration) => {
+    if (declaration[1]?.text === "interface") {
+      const name = declaration[2].text;
+      return [
+        "export",
+        "interface",
+        name,
+        "{",
+        ...interfaceBody(sources, source, name),
+        "}",
+      ];
+    }
+    const functionAt = declaration[1]?.text === "async" ? 2 : 1;
+    if (declaration[functionAt]?.text === "function") {
+      const open = declaration.findIndex((token) => token.text === "{");
+      const closeParen = declaration.findLastIndex((token, index) =>
+        index < open && token.text === ")"
+      );
+      // Factories infer return types from their bodies; compare them in full.
+      if (declaration[closeParen + 1]?.text === ":") {
+        return canonical(source, declaration.slice(0, open));
+      }
+    }
+    return canonical(source, declaration);
+  });
+}
+function importsValid(before: Map<string, string>, after: Map<string, string>) {
+  const paths = (file: string, text: string) =>
+    [...text.matchAll(/^(?:import|export)[^\n]* from ("(?:\\.|[^"\\])*");$/gm)]
+      .map((
+        match,
+      ) => modulePath(file, JSON.parse(match[1])));
+  const external = new Set<string>();
+  for (const [file, text] of before) {
+    for (const path of paths(file, text)) {
+      if (!before.has(path)) external.add(path);
+    }
+  }
+  for (const [file, text] of after) {
+    for (const path of paths(file, text)) {
+      if (path.startsWith("@") || !path.endsWith(".ts")) continue;
+      assert.ok(
+        after.has(path) || external.has(path),
+        `${file}: missing generated import ${path}`,
+      );
+    }
   }
 }
-
+// Exact snapshots still check every byte. This independent comparison prevents
+// reviewed output changes from also changing the existing public API or SQL.
+export function assertPreservedOutput(beforeBytes: Buffer, afterBytes: Buffer) {
+  const before = responseFiles(beforeBytes), after = responseFiles(afterBytes);
+  assert.deepEqual(
+    [...after.keys()].filter((name) => !supportFile(name)),
+    [...before.keys()].filter((name) => !supportFile(name)),
+    "public output files/order changed",
+  );
+  const oldSources = new Map(
+    [...before].filter(([name]) => !supportFile(name)).map((
+      [name, text],
+    ) => [name, parse(name, text)]),
+  );
+  const newSources = new Map(
+    [...after].filter(([name]) =>
+      !/^runtime(?:_|\.)|^codec_error\.ts$/.test(name)
+    ).map(([name, text]) => [name, parse(name, text)]),
+  );
+  for (const [name, old] of oldSources) {
+    const current = newSources.get(name)!;
+    assert.deepEqual(
+      publicAPI(newSources, current),
+      publicAPI(oldSources, old),
+      `${name}: public declarations changed`,
+    );
+    const sql = (source: Source) =>
+      source.tokens.filter((token) =>
+        token.kind === "template" && token.text.includes("-- name:")
+      ).map((token) => token.text);
+    assert.deepEqual(sql(current), sql(old), `${name}: SQL text changed`);
+    assert.deepEqual(
+      otherComments(current),
+      otherComments(old),
+      `${name}: user comments changed`,
+    );
+    for (const declaration of old.declarations) {
+      if (
+        declaration[0]?.text !== "export" ||
+        declaration[1]?.text !== "interface"
+      ) continue;
+      const type = declaration[2].text;
+      assert.deepEqual(
+        fieldComments(newSources, current, type),
+        fieldComments(oldSources, old, type),
+        `${name}: ${type} field comments changed`,
+      );
+    }
+  }
+  importsValid(before, after);
+}
+export interface OutputCorpus {
+  format: 1;
+  description: string;
+  response_blobs: string[];
+  changes: {
+    before_sha256: string;
+    after_sha256: string;
+    response_chunks: number[];
+  }[];
+}
 export async function createRuntimeMigration() {
-  const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-    .decode(
+  const corpus: OutputCorpus = JSON.parse(
+    gunzipSync(
       await Deno.readFile(
-        new URL("../../src/templates/runtime.ts", import.meta.url),
+        new URL("./fixtures/compact-output.json.gz", import.meta.url),
       ),
-    )
-    .replace(/\r\n?/g, "\n");
-  const expected = new Map(
-    Object.entries(variants).map(([oldHash, variant]) => {
-      const body = expectedRuntime(source, variant);
-      assertBackend(body, variant);
-      return [oldHash, body] as const;
-    }),
+    ).toString(),
   );
-  const current = new Map(
-    [...expected].map(([oldHash, body]) => [hash(body), variants[oldHash]]),
+  assert.equal(corpus.format, 1, "unsupported compact output fixture format");
+  const blobs = corpus.response_blobs.map((text) =>
+    Buffer.from(text, "base64")
   );
+  const expected = new Map<string, Buffer>();
+  for (const change of corpus.changes) {
+    assert.match(change.before_sha256, /^[a-f0-9]{64}$/);
+    assert.ok(
+      !expected.has(change.before_sha256),
+      "duplicate compact output fixture",
+    );
+    const response = Buffer.concat(change.response_chunks.map((index) => {
+      assert.ok(
+        Number.isInteger(index) && index >= 0 && index < blobs.length,
+        "invalid compact output chunk",
+      );
+      return blobs[index];
+    }));
+    assert.equal(
+      hash(response),
+      change.after_sha256,
+      "compact output fixture hash",
+    );
+    responseFiles(response);
+    expected.set(change.before_sha256, response);
+  }
   const covered = new Set<string>();
   return {
     migrate(response: Buffer): Buffer {
       const files = responseFiles(response);
-      let changed = false;
-      for (const file of files) {
-        if (file[0][1].toString() !== "runtime.ts") continue;
-        const oldHash = hash(file[1][1]), body = expected.get(oldHash);
-        assert.ok(body, `unreviewed historical runtime body ${oldHash}`);
-        covered.add(oldHash);
-        file[1] = [2, body];
-        changed = true;
+      const key = hash(response), changed = expected.get(key);
+      if (changed) {
+        assertPreservedOutput(response, changed);
+        covered.add(key);
+        return changed;
       }
-      return changed
-        ? encode(files.map((file) => [1, encode(file)]))
-        : response;
+      assert.ok(
+        !files.has("runtime.ts"),
+        `unreviewed historical runtime response ${key}`,
+      );
+      return response;
     },
     assertCoverage() {
       assert.deepEqual(
         [...covered].sort(),
-        Object.keys(variants).sort(),
-        "historical runtime variants lost coverage",
+        [...expected.keys()].sort(),
+        "compact output migrations lost historical coverage",
       );
     },
     assertRuntimeOutput(response: Buffer) {
-      for (const file of responseFiles(response)) {
-        if (file[0][1].toString() !== "runtime.ts") continue;
-        const variant = current.get(hash(file[1][1]));
-        assert.ok(
-          variant,
-          "generated runtime differs from reviewed template and driver preamble",
+      const files = responseFiles(response);
+      assert.ok(
+        !files.has("runtime.ts"),
+        "output retained the old combined runtime",
+      );
+      const engines = [...files.keys()].filter((name) =>
+        /^runtime_(?:postgresql|mysql|sqlite)\.ts$/.test(name)
+      );
+      if (files.has("runtime_common.ts")) {
+        assert.equal(
+          engines.length,
+          1,
+          "runtime must include exactly one selected engine",
         );
-        assertBackend(file[1][1], variant);
+      } else {
+        assert.equal(
+          engines.length,
+          0,
+          "engine runtime has no common runtime",
+        );
+      }
+      for (const [name, text] of files) {
+        if (supportFile(name)) {
+          assert.doesNotMatch(
+            text,
+            /^\s*\/\/ @(?:if|endif)\b/m,
+            `${name}: leaked runtime section marker`,
+          );
+        }
       }
     },
   };

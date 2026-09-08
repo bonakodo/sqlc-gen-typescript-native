@@ -2,20 +2,25 @@ import assert from "node:assert/strict";
 import { inspect } from "node:util";
 import { Database } from "@bonakodo/sqlite";
 import {
-  type CodecContext,
   createJsonTextCodec,
   decodeCustom,
   decodeValue,
   encodeCustom,
-  encodeSlice,
   encodeValue,
   epochMilliseconds,
   jsonText,
-  QueryCodecError,
   safeInteger,
   sqliteBoolean,
-} from "./.generated/sqlite/runtime.ts";
-import * as server from "./.generated/server/runtime.ts";
+} from "./.generated/sqlite/runtime_sqlite.ts";
+import {
+  type CodecContext,
+  encodeSlice,
+} from "./.generated/sqlite/runtime_common.ts";
+import { QueryCodecError } from "./.generated/sqlite/codec_error.ts";
+import * as serverValues from "./.generated/server/runtime_postgresql.ts";
+import { QueryCodecError as ServerQueryCodecError } from "./.generated/server/codec_error.ts";
+
+const server = { ...serverValues, QueryCodecError: ServerQueryCodecError };
 
 const context: CodecContext = {
   query: "FindAuthors",

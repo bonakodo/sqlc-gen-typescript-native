@@ -12,7 +12,8 @@ tools/build.sh
 deno run --allow-read --allow-write tests/runtime/prepare.ts
 rm -rf tests/integration/.generated
 deno test --config tests/integration/deno.json --allow-read --allow-write --allow-env=SQLC --allow-run \
-  tests/integration/generate_test.ts tests/integration/large_schema_test.ts tests/integration/codec_types_test.ts
+  tests/integration/generate_test.ts tests/integration/large_schema_test.ts tests/integration/codec_types_test.ts \
+  tests/integration/compact_output_test.ts
 deno lint --no-config --rules-tags= --rules-include=no-import-prefix tests/integration/.generated/deno-*/wasm/*.ts
 deno check --config tests/integration/deno.json tests/integration/.generated/*/wasm/*.ts \
   tests/integration/sqlite_deno_test.ts tests/integration/ergonomics_test.ts

@@ -1,3 +1,11 @@
+/** Shared names retained once per query and result field. */
+export type QueryContext = readonly [query: string, file: string];
+export type FieldContext = readonly [field: string, expectedType: string];
+
+export function codecContext(query: QueryContext, field: FieldContext): CodecContext {
+  return { query: query[0], file: query[1], field: field[0], expectedType: field[1] };
+}
+
 /** Static query metadata attached to value conversion failures. */
 export interface CodecContext {
   readonly query: string;

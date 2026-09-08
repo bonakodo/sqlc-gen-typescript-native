@@ -5,8 +5,8 @@ import {
   encodeArray,
   encodeValue,
   jsonValue,
-} from "./.generated/server/runtime.ts";
-import { encodeValue as encodePostgresValue } from "./.generated/postgres/runtime.ts";
+} from "./.generated/server/runtime_postgresql.ts";
+import { encodeValue as encodePostgresValue } from "./.generated/postgres/runtime_postgresql.ts";
 
 Deno.test("generated pg and postgres.js runtimes keep their distinct JSON bindings", () => {
   for (

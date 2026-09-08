@@ -1,7 +1,13 @@
 import { generateAssets } from "../../tools/assets.ts";
 import type { Column, Identifier } from "./fixture_types.ts";
 import { Buffer } from "node:buffer";
-import { command, errorMessage, type Pair, wabt } from "./test_helpers.ts";
+import {
+  command,
+  errorMessage,
+  legacyOutputHarness,
+  type Pair,
+  wabt,
+} from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
@@ -140,7 +146,8 @@ Deno.test("WAT types", async () => {
       "out_cursor",
       "out_indent",
     ];
-    const source = "(module\n" + fragments.join("\n") + "\n" +
+    const source = "(module\n" + fragments.join("\n") + legacyOutputHarness +
+      "\n" +
       assets + "\n" +
       funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") + "\n" +
       globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") + "\n)";

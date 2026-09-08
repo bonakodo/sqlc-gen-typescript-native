@@ -385,6 +385,7 @@
 (func $value_call (param $module i32) (param $field i32) (param $expression i32) (param $expression_n i32) (param $context i32) (param $context_n i32) (param $decode i32) (result i32 i32)
   (local $dims i32) (local $custom i32) (local $name i32) (local $name_n i32)
   (local $codec i32) (local $codec_n i32) (local $typ i32) (local $typ_n i32) (local $start i32)
+  (if (global.get $compact_active) (then (call $runtime_kind (call $kind_text (i32.load offset=32 (local.get $field))))))
   (local.set $dims (i32.load offset=40 (local.get $field)))
   (local.set $custom (i32.ne (i32.load offset=60 (local.get $field)) (i32.const 0)))
   (if (local.get $decode)
@@ -399,7 +400,19 @@
         (else (if (local.get $custom) (then (call $t_encodeCustom) local.set $name_n local.set $name) (else (call $t_encodeValue) local.set $name_n local.set $name))))))
   (call $runtime_import (local.get $module) (local.get $name) (local.get $name_n) (i32.const 0)) local.set $name_n local.set $name
   (if (local.get $custom)
-    (then (call $module_import (local.get $module) (call $get_text (local.get $field) (i32.const 48)) (call $get_text (local.get $field) (i32.const 56)) (i32.const 0)) local.set $codec_n local.set $codec))
+    (then
+      (if (result i32 i32) (i32.and (global.get $compact_active)
+        (i32.or
+          (call $eq (call $get_text (local.get $field) (i32.const 48)) (call $c_runtime_path))
+          (i32.or
+            (call $eq (call $get_text (local.get $field) (i32.const 48)) (call $runtime_file_path (global.get $gen_engine)))
+            (call $eq (call $get_text (local.get $field) (i32.const 48)) (call $runtime_file_path (i32.const 0))))))
+        (then (call $runtime_import (local.get $module) (call $get_text (local.get $field) (i32.const 56)) (i32.const 0)))
+        (else
+          (if (i32.and (global.get $compact_active) (i32.eq (global.get $gen_engine) (i32.const 1)))
+            (then (call $runtime_external_sqlite_codec)))
+          (call $module_import (local.get $module) (call $get_text (local.get $field) (i32.const 48)) (call $get_text (local.get $field) (i32.const 56)) (i32.const 0))))
+      local.set $codec_n local.set $codec))
   (local.set $start (global.get $txt_cursor)) (call $text_append (local.get $name) (local.get $name_n))
   (if (i32.or (local.get $decode) (local.get $custom))
     (then

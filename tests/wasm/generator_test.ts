@@ -1,5 +1,8 @@
 import type { GeneratorCorpus } from "./fixture_types.ts";
-import { createRuntimeMigration } from "./runtime_migration.ts";
+import {
+  assertPreservedOutput,
+  createRuntimeMigration,
+} from "./runtime_migration.ts";
 interface Expected {
   status: number;
   response: Buffer;
@@ -122,8 +125,8 @@ Deno.test("WAT generator", async (t) => {
       return {
         ...c,
         request,
-        // Verify the immutable old response hash above before changing only its
-        // known runtime.ts body for the reviewed source-template merge.
+        // Verify historical bytes before loading reviewed compact expectations.
+        // The migration independently checks SQL and expanded public types.
         response: runtimeMigration.migrate(response),
         stderr: Buffer.from(c.stderr),
       };
@@ -275,7 +278,7 @@ Deno.test("WAT generator", async (t) => {
   }
 });
 
-Deno.test("runtime fixture migration rejects unknown support and retains other files", async () => {
+Deno.test("output fixture migration rejects unknown responses and retains unchanged files", async () => {
   const migration = await createRuntimeMigration();
   const field = (key: number, bytes: Uint8Array) => {
     assert.ok(bytes.length < 128);
@@ -295,10 +298,131 @@ Deno.test("runtime fixture migration rejects unknown support and retains other f
   assert.strictEqual(migration.migrate(empty), empty);
   assert.throws(
     () => migration.migrate(response("runtime.ts", "unreviewed runtime")),
-    /unreviewed historical runtime body/,
+    /unreviewed historical runtime response/,
   );
   assert.throws(
     () => migration.migrate(Buffer.concat([other, Buffer.from([10, 127])])),
     /truncated frozen response field/,
+  );
+});
+
+Deno.test("output migration audit resolves shared types and catches public regressions", () => {
+  const uint = (value: number) => {
+    const bytes: number[] = [];
+    do {
+      const byte = value & 127;
+      value >>>= 7;
+      bytes.push(byte | (value ? 128 : 0));
+    } while (value);
+    return Buffer.from(bytes);
+  };
+  const field = (key: number, bytes: Buffer) =>
+    Buffer.concat([uint(key * 8 + 2), uint(bytes.length), bytes]);
+  const response = (files: Record<string, string>) =>
+    Buffer.concat(
+      Object.entries(files).map(([name, source]) =>
+        field(
+          1,
+          Buffer.concat([
+            field(1, Buffer.from(name)),
+            field(2, Buffer.from(source)),
+          ]),
+        )
+      ),
+    );
+  const sql =
+    "export const readQuery = `-- name: Read :one\nSELECT 'brace } and quote \"'`;\n";
+  const comment = '/** Keep \\"quotes\\" and { braces }. */\n';
+  const old = response({
+    "nested/query_sql.ts":
+      'import type { Database as _old } from "../runtime.ts";\n' + sql +
+      comment +
+      'export interface ReadRow { id: number; "a\\"b": string | null; _short: boolean; }\n' +
+      "export async function read(database: _old): Promise<ReadRow | null> { return null; }\n",
+    "runtime.ts": "export interface Database {}\n",
+  });
+  const files = {
+    "nested/query_sql.ts":
+      'import type { Database as _db } from "../runtime_postgresql.ts";\n' +
+      'import type { Shared as _short } from "../query_helpers.ts";\n' + sql +
+      comment +
+      "export interface ReadRow extends _short {}\n" +
+      "export async function read(database: _db): Promise<ReadRow | null> { return null; }\n",
+    "runtime_common.ts": "export const common = 1;\n",
+    "runtime_postgresql.ts":
+      'import { common } from "./runtime_common.ts";\nexport interface Database {}\n',
+    "query_helpers.ts":
+      'export interface Shared { id: number; "a\\"b": string | null; _short: boolean; }\n',
+  };
+  assertPreservedOutput(old, response(files));
+  assert.throws(
+    () =>
+      assertPreservedOutput(
+        old,
+        response({
+          ...files,
+          "query_helpers.ts": files["query_helpers.ts"].replace(
+            "string | null",
+            "string",
+          ),
+        }),
+      ),
+    /public declarations changed/,
+  );
+  assert.throws(
+    () =>
+      assertPreservedOutput(
+        old,
+        response({
+          ...files,
+          "query_helpers.ts": files["query_helpers.ts"].replace(
+            "id: number",
+            "renamed: number",
+          ),
+        }),
+      ),
+    /public declarations changed/,
+  );
+  assert.throws(
+    () =>
+      assertPreservedOutput(
+        old,
+        response({
+          ...files,
+          "nested/query_sql.ts": files["nested/query_sql.ts"].replace(
+            "SELECT",
+            "DELETE",
+          ),
+        }),
+      ),
+    /public declarations changed|SQL text changed/,
+  );
+  for (const keyword of ["import", "export"]) {
+    assert.throws(
+      () =>
+        assertPreservedOutput(
+          old,
+          response({
+            ...files,
+            "runtime_postgresql.ts":
+              `${keyword} { common } from "./missing.ts";\nexport interface Database {}\n`,
+          }),
+        ),
+      /missing generated import/,
+    );
+  }
+  assert.throws(
+    () =>
+      assertPreservedOutput(
+        old,
+        response({
+          ...files,
+          "nested/query_sql.ts": files["nested/query_sql.ts"].replace(
+            comment,
+            "",
+          ),
+        }),
+      ),
+    /user comments changed/,
   );
 });

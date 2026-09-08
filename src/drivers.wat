@@ -174,6 +174,8 @@
 ;; before fmt4 starts, so nested helper use cannot overwrite a live argument.
 (func $driver_context (param $query i32) (param $name i32) (param $name_n i32)
   (param $type i32) (param $type_n i32) (result i32 i32)
+  (if (global.get $compact_active) (then (return (call $compact_context (global.get $gen_current_module)
+    (local.get $name) (local.get $name_n) (local.get $type) (local.get $type_n)))))
   (call $fmt4 (call $drv_context)
     (call $quote (call $text_ptr (local.get $query) (i32.const 2)) (call $text_len (local.get $query) (i32.const 2)))
     (call $quote (call $text_ptr (local.get $query) (i32.const 7)) (call $text_len (local.get $query) (i32.const 7)))
@@ -227,6 +229,8 @@
         (global.set $driver_row_index (i32.add (global.get $driver_row_index) (i32.const 1)))))
     (local.set $fields (call $next (local.get $fields))) (br $loop))))
 (func $driver_row (param $m i32) (param $plan i32)
+  (if (i32.and (global.get $compact_active) (i32.eqz (global.get $compact_in_helper))) (then
+    (call $line (call $fmt1 (call $drv_return_value) (call $compact_row_call (local.get $m) (local.get $plan)))) (return)))
   (call $line (call $fmt1 (call $drv_row_width) (call $decimal_i32 (call $field_count (i32.load offset=52 (local.get $plan))))))
   (call $line (call $fmt1 (call $drv_row_start) (call $drv_return))) (call $indent)
   (global.set $driver_row_index (i32.const 0))
@@ -237,6 +241,8 @@
     (if (i32.ne (global.get $gen_engine) (i32.const 1)) (then (call $line (call $fmt1 (call $drv_one_count) (call $null_text)))))
     (call $line (call $drv_first_row)) (call $line (call $fmt1 (call $drv_missing_row) (call $null_text)))
     (call $driver_row (local.get $m) (local.get $plan)) (return)))
+  (if (i32.and (global.get $compact_active) (i32.eqz (global.get $compact_in_helper))) (then
+    (call $line (call $fmt1 (call $c_compact_map) (call $compact_row_call (local.get $m) (local.get $plan)))) (return)))
   (call $line (call $fmt1 (call $drv_rows_map) (call $get_text (local.get $plan) (i32.const 40))))
   (call $indent) (call $driver_row (local.get $m) (local.get $plan)) (call $dedent) (call $line (call $drv_map_end)))
 

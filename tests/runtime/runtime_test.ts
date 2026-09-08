@@ -6,7 +6,7 @@ import {
   encodeValue,
   lastInsertId,
   type SqliteCodec,
-} from "./.generated/sqlite/runtime.ts";
+} from "./.generated/sqlite/runtime_sqlite.ts";
 
 /** assertEqual compares scalar values without coercion. */
 function assertEqual(actual: unknown, expected: unknown): void {

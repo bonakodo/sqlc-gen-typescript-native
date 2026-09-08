@@ -37,7 +37,9 @@
   (call $set_text (local.get $r) (i32.const 16) (call $retain_text (local.get $name) (local.get $name_n)))
   (call $set_text (local.get $r) (i32.const 24)
     (call $name_take (i32.load offset=16 (local.get $m))
-      (call $concat (call $c_import_prefix) (call $upper_first (local.get $name) (local.get $name_n)))))
+      (if (result i32 i32) (global.get $compact_active)
+        (then (call $concat (call $c_compact_import_prefix) (local.get $name) (local.get $name_n)))
+        (else (call $concat (call $c_import_prefix) (call $upper_first (local.get $name) (local.get $name_n)))))))
   (i32.store offset=32 (local.get $r) (local.get $type_only))
   (i32.store offset=4 (local.get $r) (local.get $at))
   (if (local.get $previous)
@@ -46,7 +48,10 @@
   (call $get_text (local.get $r) (i32.const 24)))
 
 (func $runtime_import (param $m i32) (param $name i32) (param $n i32) (param $type_only i32) (result i32 i32)
-  (call $module_import (local.get $m) (call $c_runtime_path) (local.get $name) (local.get $n) (local.get $type_only)))
+  (call $module_import (local.get $m)
+    (if (result i32 i32) (global.get $compact_active)
+      (then (call $runtime_path (local.get $name) (local.get $n))) (else (call $c_runtime_path)))
+    (local.get $name) (local.get $n) (local.get $type_only)))
 
 (func $module_begin (param $m i32)
   (call $file_begin (call $get_text (local.get $m) (i32.const 8)))

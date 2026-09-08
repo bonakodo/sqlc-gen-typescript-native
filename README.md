@@ -163,7 +163,13 @@ handle; the generated code does not open or close connections.
 - `models.ts` contains table interfaces.
 - Catalog enums produce `enums.ts` with value arrays and their derived types.
 - `index.ts` exports models, enums, and query namespaces.
-- `runtime.ts` contains shared conversions and driver connection types.
+- `query_helpers.ts` shares argument and row types, parameter encoders, row
+  decoders, and field metadata across SQL modules. Query modules keep their
+  public names and interfaces.
+- `runtime_common.ts` contains helpers used across engines. A second file,
+  `runtime_sqlite.ts`, `runtime_postgresql.ts`, or `runtime_mysql.ts`, contains
+  the selected engine's conversions and driver connection types. Generation
+  includes only the helpers and value kinds the queries need.
 - `codec_error.ts` contains structured conversion errors without bound or stored
   values.
 - Server-driver output includes `json.ts` with reusable JSON value types.
@@ -420,11 +426,16 @@ values. `epoch_milliseconds` maps integer milliseconds to `Date`.
 `sqlite_boolean` binds booleans and reads integer 0/1. `json_text` stores JSON
 as text and returns parsed values. Its default static type is `unknown`; an
 explicit `ts_type` describes an application contract, not runtime validation.
-For validation, export a codec made with `createJsonTextCodec(parse)` from the
-generated `runtime.ts` and reference that codec in your mapping. Its parser runs
+For validation, import `createJsonTextCodec` from the generated
+`runtime_sqlite.ts`, export a codec made with `createJsonTextCodec(parse)` from
+your own module, and reference that codec in your mapping. Its parser runs
 on reads and writes and determines its TypeScript result. The runtime also
-exports the preset codecs as `safeInteger`, `epochMilliseconds`,
-`sqliteBoolean`, and `jsonText`.
+includes the preset codecs used by your mappings as `safeInteger`,
+`epochMilliseconds`, `sqliteBoolean`, and `jsonText`. A `json_text` mapping also
+retains `createJsonTextCodec`. External SQLite codec modules retain the public
+preset helpers and factory, since the generator cannot inspect their imports.
+Direct codec mappings to `./runtime_sqlite.ts` select the named helper.
+The old `./runtime.ts` mapping path still resolves to the selected runtime.
 
 Column overrides retain first-match precedence over database-type overrides.
 `nullable_all: true` applies a database-type rule to both required and nullable
@@ -476,6 +487,10 @@ inside an error thrown by an application codec. `originalCause()` provides the
 original exception for explicit local debugging; it may contain application
 data. SQL constraint and driver errors propagate unchanged.
 
+`expectedType` describes the generated type. Imported type aliases in that
+string can change after regeneration; use the other fields to identify a
+specific query or field.
+
 ## Migration
 
 After regenerating, handle conversion failures through `QueryCodecError` fields
@@ -485,6 +500,11 @@ bindings now reject missing required inputs; use `sqlc.narg` or a query override
 when an argument should accept SQL NULL. The new factory, mapping, and
 input-null options are opt-in. Output always omits boilerplate documentation.
 Remove the `compact` key from existing configurations; the parser rejects it.
+
+Generated runtime imports now use `runtime_common.ts` and the selected engine's
+file. Update any application imports from `runtime.ts`, then remove that stale
+file after regeneration. Query modules share private types and converters in
+`query_helpers.ts`; keep that file with the rest of the generated output.
 
 From the older TypeScript plugin, change the plugin WASM URL and keep your
 runtime, driver, and mysql2 options. The default API follows that plugin. Output
@@ -569,7 +589,7 @@ in CI.
 | Directory            | Contents                                                            |
 | -------------------- | ------------------------------------------------------------------- |
 | `src/`               | WAT modules, constant strings, Unicode and inflection tables        |
-| `src/templates/`     | Shared runtime template with driver sections, JSON types, and codec errors |
+| `src/templates/`     | Common and engine runtimes, JSON types, and codec errors            |
 | `tools/`             | Pinned tool setup, assembly, data packing, and test commands        |
 | `tests/wasm/`        | Deno component and full-plugin tests, fixtures, and WASI host       |
 | `tests/tools/`       | Tests for Deno data encoders and packers                            |
