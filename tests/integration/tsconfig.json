@@ -1,0 +1,34 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    ".generated/embed-pg/wasm/*.ts",
+    ".generated/embed-sqlite/wasm/*.ts",
+    "embed_types_test.ts",
+    ".generated/enum-*/wasm/*.ts",
+    "enum_types_test.ts",
+    ".generated/node-*/wasm/*.ts",
+    ".generated/bun-*/wasm/*.ts",
+    ".generated/mysql-*/wasm/*.ts",
+    ".generated/native-better-sqlite3/wasm/*.ts",
+    ".generated/ergonomics-better-sqlite3/wasm/*.ts",
+    ".generated/types-only/wasm/*.ts",
+    ".generated/json-*/wasm/*.ts",
+    "json_domain.ts",
+    "json_types_test.ts",
+    "sqlite_node_test.ts",
+    "servers_test.ts"
+  ]
+}

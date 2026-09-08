@@ -1,4 +1,6 @@
 /bin/
-/coverage.out
-/scripts/node_modules/
-/scripts/.integration/
+/tests/integration/node_modules/
+/tests/integration/.generated/
+__pycache__/
+.DS_Store
+/tests/runtime/.generated/

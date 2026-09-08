@@ -1,3 +1,0 @@
-go test fuzz v1
-byte('\x03')
-[]byte("\xa0000\xff\xff\xff\xff\xff\xff0\xa9\x0000000000")

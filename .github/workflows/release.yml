@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -21,14 +21,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: denoland/setup-deno@v2
         with:
-          go-version-file: go.mod
-      - run: make tools
-      - name: Test and build WASM
-        run: make check
+          deno-version: "v2.9.6"
+      - run: deno task tools
+      - name: Check, test, and build WASM
+        run: deno task check
       - name: Install stock sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+        run: |
+          tools/setup-sqlc.sh
+          echo "$PWD/bin/.tools/sqlc-1.31.1" >> "$GITHUB_PATH"
       - name: Check WASM generation with stock sqlc
         working-directory: examples/deno-sqlite
         run: |
@@ -42,6 +44,14 @@ jobs:
           sha256sum --check sqlc-gen-typescript-native.wasm.sha256
           checksum=$(cut -d ' ' -f 1 sqlc-gen-typescript-native.wasm.sha256)
           cat > release-notes.md <<EOF
+          The TypeScript generator now uses a pure WebAssembly implementation,
+          written in WebAssembly text (WAT), replacing the previous Go implementation.
+          The plugin runs directly in sqlc's WASI host.
+
+          The release filename and sqlc options stay the same. If you used the
+          process plugin, switch to the WASM configuration below. The Go library
+          and process plugin are no longer included.
+
           Use this release in your sqlc configuration:
 
           \`\`\`yaml
@@ -63,7 +73,7 @@ jobs:
                     driver: pg
           \`\`\`
 
-          Run \`sqlc generate\`. No Go installation or local plugin build is needed.
+          Run \`sqlc generate\`. No local plugin build is needed.
           EOF
       - name: Publish GitHub release
         env:
