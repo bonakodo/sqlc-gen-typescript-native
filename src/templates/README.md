@@ -13,6 +13,13 @@ Each project gets `runtime_common.ts` and one engine runtime:
 | [runtime_postgresql.ts](runtime_postgresql.ts) | Driver connection types, arrays, and shared helper exports |
 | [runtime_mysql.ts](runtime_mysql.ts) | Driver connection types, insert IDs, and shared helper exports |
 
+The `execution_sqlite.ts`, `execution_postgresql.ts`, and `execution_mysql.ts`
+fragments join their engine's runtime during the build. They share query
+execution across generated functions and follow the same declaration pruning
+rules. SQLite helpers keep row decoding and write-result conversion inside
+statement cleanup; each driver retains its own missing-row and return-value
+rules. Helpers do not cache statements or own connections.
+
 [assets.ts](../../tools/assets.ts) builds a dependency table from the templates.
 [runtime.wat](../runtime.wat) records imports and conversion kinds as it plans
 queries, follows the table, and emits each needed declaration once in source
@@ -45,7 +52,11 @@ WASM selection table holds at most 256 declarations; the build checks that
 bound too. Adding a helper needs no generated WAT code or TypeScript parser.
 
 [json.ts](json.ts) and [codec_error.ts](codec_error.ts) remain separate support
-files. SQLite's `json_text` preset includes `createJsonTextCodec` so application
+files. Generated conversions pass query and field metadata separately and build
+full error context only on failure. The object-based context helpers remain
+available for callers that use them directly.
+
+SQLite's `json_text` preset includes `createJsonTextCodec` so application
 code can add shape checks; other presets remain separate and appear when a
 query mapping selects them. An explicit codec mapping can name a generated
 preset through `./runtime_sqlite.ts`; the old `./runtime.ts` mapping path also

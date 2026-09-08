@@ -9,8 +9,14 @@
 // @part CodecContext common.CodecContext
 import type { CodecContext } from "./runtime_common.ts";
 
-// @part withCodecContext common.withCodecContext
-import { withCodecContext } from "./runtime_common.ts";
+// @part QueryContext common.QueryContext
+import type { QueryContext } from "./runtime_common.ts";
+
+// @part FieldContext common.FieldContext
+import type { FieldContext } from "./runtime_common.ts";
+
+// @part throwCodecError common.throwCodecError
+import { throwCodecError } from "./runtime_common.ts";
 
 // @part Buffer
 import { Buffer } from "node:buffer";
@@ -271,24 +277,37 @@ function encodeArrayText(value: unknown, delimiter: string): string | null {
   }).join(delimiter) + "}";
 }
 
+// @part parseRawColumn @postgres
+export function parseRawColumn(
+  column: { parser?: ((value: string) => unknown) | undefined },
+  text: string,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
+): unknown {
+  try {
+    return column.parser ? column.parser(text) : text;
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
+}
+
 // @part encodeArray
 export function encodeArray(
   kind: Kind,
   value: unknown,
   dimensions: number,
   nullable = true,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): unknown {
-  return withCodecContext(
-    context,
-    "encode",
-    () => {
-      if (!nullable && (value === null || value === undefined)) {
-        throw new TypeError("Missing a non-null array");
-      }
-      return encodeArrayUnchecked(kind, value, dimensions);
-    },
-  );
+  try {
+    if (!nullable && (value === null || value === undefined)) {
+      throw new TypeError("Missing a non-null array");
+    }
+    return encodeArrayUnchecked(kind, value, dimensions);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 // @part decodeArray
@@ -298,14 +317,14 @@ export function decodeArray<T>(
   dimensions: number,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () =>
-      decodeArrayUnchecked<T>(kind, value, dimensions, nullable, undefinedNull),
-  );
+  try {
+    return decodeArrayUnchecked<T>(kind, value, dimensions, nullable, undefinedNull);
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
 }
 
 // @part encodeArrayCustom
@@ -315,13 +334,14 @@ export function encodeArrayCustom<T>(
   value: unknown,
   dimensions: number,
   nullable: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): unknown {
-  return withCodecContext(
-    context,
-    "encode",
-    () => encodeArrayCustomUnchecked(codec, kind, value, dimensions, nullable),
-  );
+  try {
+    return encodeArrayCustomUnchecked(codec, kind, value, dimensions, nullable);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 // @part decodeArrayCustom
@@ -332,21 +352,21 @@ export function decodeArrayCustom<T, Element = unknown>(
   dimensions: number,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () =>
-      decodeArrayCustomUnchecked<T>(
-        codec,
-        kind,
-        value,
-        dimensions,
-        nullable,
-        undefinedNull,
-      ),
-  );
+  try {
+    return decodeArrayCustomUnchecked<T>(
+      codec,
+      kind,
+      value,
+      dimensions,
+      nullable,
+      undefinedNull,
+    );
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
 }
 
 // @part encodeValue common.encodeValue

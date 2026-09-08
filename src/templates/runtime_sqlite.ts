@@ -6,8 +6,14 @@
 // @part CodecContext common.CodecContext
 import type { CodecContext } from "./runtime_common.ts";
 
-// @part withCodecContext common.withCodecContext
-import { withCodecContext } from "./runtime_common.ts";
+// @part QueryContext common.QueryContext
+import type { QueryContext } from "./runtime_common.ts";
+
+// @part FieldContext common.FieldContext
+import type { FieldContext } from "./runtime_common.ts";
+
+// @part throwCodecError common.throwCodecError
+import { throwCodecError } from "./runtime_common.ts";
 
 // @part checkedJson common.checkedJson
 import { checkedJson } from "./runtime_common.ts";
@@ -434,13 +440,14 @@ export function encodeValue(
   kind: Kind,
   value: unknown,
   nullable = true,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): DriverValue {
-  return withCodecContext(
-    context,
-    "encode",
-    () => encodeValueUnchecked(kind, value, nullable),
-  );
+  try {
+    return encodeValueUnchecked(kind, value, nullable);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 // @part decodeValue
@@ -449,13 +456,14 @@ export function decodeValue<T>(
   value: DriverValue,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () => decodeValueUnchecked<T>(kind, value, nullable, undefinedNull),
-  );
+  try {
+    return decodeValueUnchecked<T>(kind, value, nullable, undefinedNull);
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
 }
 
 // @part encodeCustom
@@ -463,13 +471,14 @@ export function encodeCustom<T>(
   codec: DriverCodec<T>,
   value: unknown,
   nullable: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): DriverValue {
-  return withCodecContext(
-    context,
-    "encode",
-    () => encodeCustomUnchecked(codec, value, nullable),
-  );
+  try {
+    return encodeCustomUnchecked(codec, value, nullable);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 // @part decodeCustom
@@ -478,13 +487,14 @@ export function decodeCustom<T>(
   value: DriverValue,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () => decodeCustomUnchecked(codec, value, nullable, undefinedNull),
-  );
+  try {
+    return decodeCustomUnchecked(codec, value, nullable, undefinedNull);
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
 }
 
 // @part lastInsertId @bonakodo

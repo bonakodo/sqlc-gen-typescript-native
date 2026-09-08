@@ -100,6 +100,11 @@
   (local $start i32) (local $count i32) (local $header i32) (local $header_n i32)
   (local.set $q (i32.load offset=8 (local.get $plan)))
   (local.set $field (i32.load offset=48 (local.get $plan)))
+  (if (i32.and (global.get $compact_active) (i32.ne (i32.load offset=72 (local.get $plan)) (i32.const 0))) (then
+    (if (call $compact_direct_bindings (local.get $plan)) (then
+      (call $line (call $fmt2 (call $c_compact_file_line) (call $c_bindings_variable)
+        (call $compact_bound_call (local.get $m) (local.get $plan))))
+      (call $c_bindings_variable) (call $get_text (local.get $plan) (i32.const 24)) return))))
   (if (i32.and (global.get $compact_active) (i32.ne (i32.load offset=72 (local.get $plan)) (i32.const 0)))
     (then (call $compact_bindings (local.get $m) (local.get $plan)))
     (else

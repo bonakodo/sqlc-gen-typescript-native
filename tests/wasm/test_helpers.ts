@@ -91,6 +91,7 @@ export const legacyOutputHarness = `
   (global $compact_active i32 (i32.const 0))
   (global $compact_in_helper i32 (i32.const 0))
   (func $compact_context (param i32 i32 i32 i32 i32) (result i32 i32) unreachable)
+  (func $compact_field_context (param i32 i32 i32 i32 i32) (result i32 i32) unreachable)
   (func $compact_row_call (param i32 i32) (result i32 i32) unreachable)
   (func $runtime_path (param i32 i32) (result i32 i32) unreachable)
   (func $runtime_file_path (param i32) (result i32 i32) (i32.const 0) (i32.const 0))

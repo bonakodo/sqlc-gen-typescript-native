@@ -56,23 +56,35 @@ export class QueryCodecError extends TypeError {
   }
 }
 
+/** Add source metadata only after conversion fails; driver errors stay unchanged. */
+export function throwCodecError(
+  cause: unknown,
+  phase: "encode" | "decode",
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
+): never {
+  if (context === undefined) throw cause;
+  const details = "query" in context ? context : codecContext(context, field!);
+  if (
+    cause instanceof QueryCodecError && cause.phase === phase &&
+    cause.query === details.query && cause.file === details.file &&
+    cause.field === details.field &&
+    cause.expectedType === details.expectedType
+  ) throw cause;
+  throw new QueryCodecError(details, phase, cause);
+}
+
 /** Only the conversion callback is wrapped; driver errors stay unchanged. */
 export function withCodecContext<T>(
-  context: CodecContext | undefined,
+  context: CodecContext | QueryContext | undefined,
   phase: "encode" | "decode",
   convert: () => T,
+  field?: FieldContext,
 ): T {
-  if (context === undefined) return convert();
   try {
     return convert();
   } catch (cause) {
-    if (
-      cause instanceof QueryCodecError && cause.phase === phase &&
-      cause.query === context.query && cause.file === context.file &&
-      cause.field === context.field &&
-      cause.expectedType === context.expectedType
-    ) throw cause;
-    throw new QueryCodecError(context, phase, cause);
+    throwCodecError(cause, phase, context, field);
   }
 }
 
@@ -80,12 +92,15 @@ export function withCodecContext<T>(
 export function encodeSlice<T>(
   value: unknown,
   convert: (value: unknown) => T,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T[] {
-  return withCodecContext(context, "encode", () => {
+  try {
     if (!Array.isArray(value)) {
       throw new TypeError("Expected a SQL slice array");
     }
     return value.map(convert);
-  });
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }

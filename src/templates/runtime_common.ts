@@ -11,6 +11,10 @@ export type { CodecContext };
 import { withCodecContext } from "./codec_error.ts";
 export { withCodecContext };
 
+// @part throwCodecError
+import { throwCodecError } from "./codec_error.ts";
+export { throwCodecError };
+
 // @part QueryCodecError
 export { QueryCodecError } from "./codec_error.ts";
 
@@ -55,10 +59,12 @@ export function checkedJson(
 }
 
 // @part QueryContext
-export type { QueryContext } from "./codec_error.ts";
+import type { QueryContext } from "./codec_error.ts";
+export type { QueryContext };
 
 // @part FieldContext
-export type { FieldContext } from "./codec_error.ts";
+import type { FieldContext } from "./codec_error.ts";
+export type { FieldContext };
 
 // @part codecContext
 export { codecContext } from "./codec_error.ts";
@@ -308,13 +314,14 @@ export function encodeValue(
   kind: Kind,
   value: unknown,
   nullable = true,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): DriverValue {
-  return withCodecContext(
-    context,
-    "encode",
-    () => encodeValueUnchecked(kind, value, nullable),
-  );
+  try {
+    return encodeValueUnchecked(kind, value, nullable);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 // @part decodeValue @pg @postgres @mysql2 postgresql.decodeValue mysql.decodeValue
@@ -323,13 +330,14 @@ export function decodeValue<T>(
   value: DriverValue,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () => decodeValueUnchecked<T>(kind, value, nullable, undefinedNull),
-  );
+  try {
+    return decodeValueUnchecked<T>(kind, value, nullable, undefinedNull);
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
 }
 
 // @part encodeCustom @pg @postgres @mysql2 postgresql.encodeCustom mysql.encodeCustom
@@ -337,13 +345,14 @@ export function encodeCustom<T>(
   codec: DriverCodec<T>,
   value: unknown,
   nullable: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): DriverValue {
-  return withCodecContext(
-    context,
-    "encode",
-    () => encodeCustomUnchecked(codec, value, nullable),
-  );
+  try {
+    return encodeCustomUnchecked(codec, value, nullable);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 // @part decodeCustom @pg @postgres @mysql2 postgresql.decodeCustom mysql.decodeCustom
@@ -352,11 +361,12 @@ export function decodeCustom<T>(
   value: DriverValue,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () => decodeCustomUnchecked(codec, value, nullable, undefinedNull),
-  );
+  try {
+    return decodeCustomUnchecked(codec, value, nullable, undefinedNull);
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
 }

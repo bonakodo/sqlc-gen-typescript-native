@@ -3,9 +3,15 @@
 import type { Database } from "@bonakodo/sqlite";
 export type { Database };
 
+
+
 import type { CodecContext } from "./runtime_common.ts";
 
-import { withCodecContext } from "./runtime_common.ts";
+import type { QueryContext } from "./runtime_common.ts";
+
+import type { FieldContext } from "./runtime_common.ts";
+
+import { throwCodecError } from "./runtime_common.ts";
 
 export type SqliteValue = null | string | number | bigint | Uint8Array;
 
@@ -94,13 +100,14 @@ export function encodeValue(
   kind: Kind,
   value: unknown,
   nullable = true,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): DriverValue {
-  return withCodecContext(
-    context,
-    "encode",
-    () => encodeValueUnchecked(kind, value, nullable),
-  );
+  try {
+    return encodeValueUnchecked(kind, value, nullable);
+  } catch (cause) {
+    throwCodecError(cause, "encode", context, field);
+  }
 }
 
 export function decodeValue<T>(
@@ -108,11 +115,67 @@ export function decodeValue<T>(
   value: DriverValue,
   nullable: boolean,
   undefinedNull: boolean,
-  context?: CodecContext,
+  context?: CodecContext | QueryContext,
+  field?: FieldContext,
 ): T {
-  return withCodecContext(
-    context,
-    "decode",
-    () => decodeValueUnchecked<T>(kind, value, nullable, undefinedNull),
-  );
+  try {
+    return decodeValueUnchecked<T>(kind, value, nullable, undefinedNull);
+  } catch (cause) {
+    throwCodecError(cause, "decode", context, field);
+  }
+}
+
+export function queryOne<
+  R extends SqliteValue[],
+  T,
+  C,
+  N extends null | undefined,
+>(
+  database: Database,
+  sql: string,
+  params: readonly SqliteValue[],
+  read: (row: R, context: C) => T,
+  context: C,
+  missing: N,
+): T | N {
+  const stmt = database.prepare(sql);
+  try {
+    stmt.safeIntegers();
+    const row = stmt.raw().get(params) as R | undefined;
+    return row === undefined ? missing : read(row, context);
+  } finally {
+    stmt[Symbol.dispose]();
+  }
+}
+
+export function queryMany<R extends SqliteValue[], T, C>(
+  database: Database,
+  sql: string,
+  params: readonly SqliteValue[],
+  read: (row: R, context: C) => T,
+  context: C,
+): T[] {
+  const stmt = database.prepare(sql);
+  try {
+    stmt.safeIntegers();
+    const rows = stmt.raw().all(params) as R[];
+    return rows.map((row) => read(row, context));
+  } finally {
+    stmt[Symbol.dispose]();
+  }
+}
+
+export function runQuery<T>(
+  database: Database,
+  sql: string,
+  params: readonly SqliteValue[],
+  read: (result: ReturnType<ReturnType<Database["prepare"]>["run"]>) => T,
+): T {
+  const stmt = database.prepare(sql);
+  try {
+    stmt.safeIntegers();
+    return read(stmt.run(params));
+  } finally {
+    stmt[Symbol.dispose]();
+  }
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -657,5 +658,88 @@ export const codec = createJsonTextCodec((value: unknown): string => {
   assert.throws(
     () => queries.readValue!(database, { value: 17 }),
     codecError("ReadValue", "query.sql", "value", "string", "encode"),
+  );
+});
+
+Deno.test("postgres raw arrays preserve scalar parser and array field error context", async () => {
+  const directory = join(output, "compact-postgres-raw-context");
+  await prepare(directory);
+  await Deno.writeTextFile(
+    join(directory, "schema.sql"),
+    "CREATE TABLE entries (id INTEGER NOT NULL, labels TEXT[] NOT NULL, count INTEGER NOT NULL);",
+  );
+  await Deno.writeTextFile(
+    join(directory, "queries/entries.sql"),
+    "-- name: ReadEntries :many\nSELECT id, labels, count FROM entries;\n",
+  );
+  await generate(directory, [{
+    engine: "postgresql",
+    schema: "schema.sql",
+    queries: "queries",
+    codegen: ["wasm", "raw"].map((plugin) => ({
+      plugin,
+      out: plugin,
+      options: { runtime: "deno", driver: "postgres" },
+    })),
+  }]);
+  await compareBuilds(directory);
+  const queries = await load(directory, "entries_sql.ts");
+  const secret = "private-invalid-value";
+  const cause = new Error(secret);
+  let failure: number | undefined;
+  let values = ["7", '{"one","two"}', "3"];
+  const database = {
+    unsafe() {
+      return {
+        raw: () =>
+          Promise.resolve(Object.assign(
+            [values.map((value) => Buffer.from(value))],
+            {
+              columns: values.map((_, index) => ({
+                parser(text: string) {
+                  if (index === failure) throw cause;
+                  if (index === 1) {
+                    throw new Error(
+                      "Array values must use the generated parser",
+                    );
+                  }
+                  return Number(text);
+                },
+              })),
+            },
+          )),
+      };
+    },
+  };
+  assert.deepEqual(await queries.readEntries!(database), [{
+    id: 7,
+    labels: ["one", "two"],
+    count: 3,
+  }]);
+  for (const [index, field] of [[0, "id"], [2, "count"]] as const) {
+    failure = index;
+    await assert.rejects(
+      () => queries.readEntries!(database) as Promise<unknown>,
+      (error: unknown) => {
+        codecError("ReadEntries", "entries.sql", field, "number", "decode")(
+          error,
+        );
+        const details = error as TypeError & { originalCause(): unknown };
+        assert.equal(details.originalCause(), cause);
+        return true;
+      },
+    );
+  }
+  failure = undefined;
+  values = ["7", "invalid-array", "3"];
+  await assert.rejects(
+    () => queries.readEntries!(database) as Promise<unknown>,
+    codecError(
+      "ReadEntries",
+      "entries.sql",
+      "labels",
+      "ReadonlyArray<string | null>",
+      "decode",
+    ),
   );
 });

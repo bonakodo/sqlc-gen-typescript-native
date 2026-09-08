@@ -168,10 +168,12 @@ handle; the generated code does not open or close connections.
   public names and interfaces.
 - `runtime_common.ts` contains helpers used across engines. A second file,
   `runtime_sqlite.ts`, `runtime_postgresql.ts`, or `runtime_mysql.ts`, contains
-  the selected engine's conversions and driver connection types. Generation
-  includes only the helpers and value kinds the queries need.
+  the selected engine's conversions, query execution helpers, and driver
+  connection types. Generation includes only the helpers and value kinds the
+  queries need. Query functions share statement handling and pass encoded
+  parameter arrays directly when their order matches the SQL bindings.
 - `codec_error.ts` contains structured conversion errors without bound or stored
-  values.
+  values. Conversions assemble diagnostic context only when they fail.
 - Server-driver output includes `json.ts` with reusable JSON value types.
 - Snake_case field names become camelCase; existing camelCase names retain their
   spelling in every driver. Unsafe names use quoted properties.

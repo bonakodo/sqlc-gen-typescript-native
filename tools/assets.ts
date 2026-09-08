@@ -433,9 +433,16 @@ export async function generateAssets(
     );
   const [source, ...texts] = await Promise.all([
     readText("src/strings.json"),
-    ...templateFiles.map(([, filename]) =>
-      readText(`src/templates/${filename}`)
-    ),
+    ...templateFiles.map(async ([name, filename]) => {
+      const source = await readText(`src/templates/${filename}`);
+      return name === "runtime_sqlite" || name === "runtime_postgresql" ||
+          name === "runtime_mysql"
+        ? source + "\n" +
+          await readText(
+            `src/templates/${name.replace("runtime_", "execution_")}.ts`,
+          )
+        : source;
+    }),
   ]);
   const constants: unknown = JSON.parse(source!);
   if (

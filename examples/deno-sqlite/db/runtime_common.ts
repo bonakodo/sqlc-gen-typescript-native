@@ -6,6 +6,11 @@ export type { CodecContext };
 import { withCodecContext } from "./codec_error.ts";
 export { withCodecContext };
 
-export type { QueryContext } from "./codec_error.ts";
+import { throwCodecError } from "./codec_error.ts";
+export { throwCodecError };
 
-export { codecContext } from "./codec_error.ts";
+import type { QueryContext } from "./codec_error.ts";
+export type { QueryContext };
+
+import type { FieldContext } from "./codec_error.ts";
+export type { FieldContext };

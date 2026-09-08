@@ -133,21 +133,54 @@
   (global.set $compact_fields_tail (local.get $field))
   (local.get $field))
 
-(func $compact_context (param $m i32) (param $name i32) (param $name_n i32) (param $type i32) (param $type_n i32) (result i32 i32)
-  (local $field i32) (local $p i32) (local $n i32)
+(func $compact_field_context (param $m i32) (param $name i32) (param $name_n i32) (param $type i32) (param $type_n i32) (result i32 i32)
+  (local $field i32)
   (local.set $field (call $compact_field (local.get $name) (local.get $name_n) (local.get $type) (local.get $type_n)))
   (if (result i32 i32) (i32.eq (local.get $m) (global.get $compact_module))
     (then (call $get_text (local.get $field) (i32.const 24)))
-    (else (call $module_import (local.get $m) (call $c_compact_path) (call $get_text (local.get $field) (i32.const 24)) (i32.const 0))))
+    (else (call $module_import (local.get $m) (call $c_compact_path) (call $get_text (local.get $field) (i32.const 24)) (i32.const 0)))))
+
+(func $compact_context (param $m i32) (param $name i32) (param $name_n i32) (param $type i32) (param $type_n i32) (result i32 i32)
+  (local $p i32) (local $n i32)
+  (call $compact_field_context (local.get $m) (local.get $name) (local.get $name_n) (local.get $type) (local.get $type_n))
   (local.set $n) (local.set $p)
-  (call $fmt3 (call $c_compact_context_call)
-    (call $runtime_import (local.get $m) (call $c_compact_context) (i32.const 0))
-    (call $get_text (local.get $m) (i32.const 40)) (local.get $p) (local.get $n)))
+  (call $concat (call $concat (call $get_text (local.get $m) (i32.const 40))
+    (call $c_comma)) (local.get $p) (local.get $n)))
 
 (func $compact_row_call (param $m i32) (param $plan i32) (result i32 i32)
   (call $fmt2 (call $c_compact_row_call)
     (call $module_import (local.get $m) (call $c_compact_path)
       (call $get_text (i32.load offset=76 (local.get $plan)) (i32.const 24)) (i32.const 0))
+    (call $get_text (local.get $m) (i32.const 40))))
+
+;; An encoder's tuple can reach the driver unchanged only when its fields
+;; match the final binding order. PostgreSQL repeats reuse one numbered slot;
+;; SQLite/MySQL occurrences each occupy a slot. Slices keep their expansion.
+(func $compact_direct_bindings (param $plan i32) (result i32)
+  (local $field i32) (local $expected i32) (local $part i32) (local $number i32)
+  (if (i32.load offset=60 (local.get $plan)) (then (return (i32.const 0))))
+  (local.set $field (i32.load offset=48 (local.get $plan)))
+  (local.set $expected (local.get $field))
+  (block $reset (loop $fields
+    (br_if $reset (i32.eqz (local.get $field)))
+    (i32.store offset=96 (local.get $field) (i32.const 0))
+    (local.set $field (call $next (local.get $field))) (br $fields)))
+  (local.set $part (i32.load offset=56 (local.get $plan)))
+  (block $done (loop $parts
+    (br_if $done (i32.eqz (local.get $part)))
+    (local.set $number (i32.load offset=16 (local.get $part)))
+    (if (local.get $number) (then
+      (local.set $field (call $bind_find_parameter (i32.load offset=48 (local.get $plan)) (local.get $number)))
+      (if (i32.eqz (i32.and (i32.eq (global.get $gen_engine) (i32.const 2)) (i32.load offset=96 (local.get $field)))) (then
+        (if (i32.ne (local.get $field) (local.get $expected)) (then (return (i32.const 0))))
+        (i32.store offset=96 (local.get $field) (i32.const 1))
+        (local.set $expected (call $next (local.get $expected)))))))
+    (local.set $part (call $next (local.get $part))) (br $parts)))
+  (i32.eqz (local.get $expected)))
+
+(func $compact_bound_call (param $m i32) (param $plan i32) (result i32 i32)
+  (call $fmt2 (call $c_compact_bind_call)
+    (call $module_import (local.get $m) (call $c_compact_path) (call $get_text (i32.load offset=72 (local.get $plan)) (i32.const 24)) (i32.const 0))
     (call $get_text (local.get $m) (i32.const 40))))
 
 (func $compact_bindings (param $m i32) (param $plan i32)
@@ -158,9 +191,7 @@
     (call $set_text (local.get $field) (i32.const 72) (call $fmt1 (call $c_compact_param) (call $decimal_i32 (i32.load offset=64 (local.get $field)))))
     (i32.store offset=96 (local.get $field) (i32.const 0))
     (local.set $field (call $next (local.get $field))) (br $names)))
-  (call $fmt2 (call $c_compact_bind_call)
-    (call $module_import (local.get $m) (call $c_compact_path) (call $get_text (i32.load offset=72 (local.get $plan)) (i32.const 24)) (i32.const 0))
-    (call $get_text (local.get $m) (i32.const 40))) (local.set $call_n) (local.set $call)
+  (call $compact_bound_call (local.get $m) (local.get $plan)) (local.set $call_n) (local.set $call)
   (local.set $start (call $text_mark))
   (local.set $field (i32.load offset=48 (local.get $plan)))
   (block $listed (loop $list

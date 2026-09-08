@@ -170,6 +170,37 @@
 (data (i32.const 3117824) " || ")
 (func $drv_condition_or (result i32 i32) (i32.const 3117824) (i32.const 4))
 
+(data (i32.const 3118080) "queryOne")
+(func $drv_query_one (result i32 i32) (i32.const 3118080) (i32.const 8))
+(data (i32.const 3118336) "queryMany")
+(func $drv_query_many (result i32 i32) (i32.const 3118336) (i32.const 9))
+(data (i32.const 3118592) "executeQuery")
+(func $drv_execute_query (result i32 i32) (i32.const 3118592) (i32.const 12))
+(data (i32.const 3118848) "runQuery")
+(func $drv_run_query (result i32 i32) (i32.const 3118848) (i32.const 8))
+(data (i32.const 3119104) "%s(database, %s, %s")
+(func $drv_call_start (result i32 i32) (i32.const 3119104) (i32.const 19))
+(data (i32.const 3119360) ");")
+(func $drv_call_end (result i32 i32) (i32.const 3119360) (i32.const 2))
+(data (i32.const 3119616) ", (result) => {")
+(func $drv_callback (result i32 i32) (i32.const 3119616) (i32.const 15))
+(data (i32.const 3119872) "const result = await %s;")
+(func $drv_shared_result (result i32 i32) (i32.const 3119872) (i32.const 24))
+(data (i32.const 3120128) "const rows = await %s;")
+(func $drv_shared_rows (result i32 i32) (i32.const 3120128) (i32.const 22))
+(data (i32.const 3120384) ")")
+(func $drv_call_close (result i32 i32) (i32.const 3120384) (i32.const 1))
+
+(data (i32.const 3120640) "return ")
+(func $drv_return_prefix (result i32 i32) (i32.const 3120640) (i32.const 7))
+
+(data (i32.const 3120896) "parseRawColumn")
+(func $drv_parse_raw (result i32 i32) (i32.const 3120896) (i32.const 14))
+(data (i32.const 3121152) "return %s(column, text, %s, _sqlcColumnContexts[index]);")
+(func $drv_raw_decode_compact (result i32 i32) (i32.const 3121152) (i32.const 56))
+(data (i32.const 3121408) "%s(%s, \22decode\22, () => %s, %s)")
+(func $drv_convert_compact (result i32 i32) (i32.const 3121408) (i32.const 30))
+
 ;; Contexts contain source metadata only. Quoting and type formatting complete
 ;; before fmt4 starts, so nested helper use cannot overwrite a live argument.
 (func $driver_context (param $query i32) (param $name i32) (param $name_n i32)
@@ -198,6 +229,12 @@
 (func $driver_convert_result (param $m i32) (param $plan i32)
   (param $name i32) (param $name_n i32) (param $type i32) (param $type_n i32)
   (param $expression i32) (param $expression_n i32) (result i32 i32)
+  (if (global.get $compact_active) (then
+    (return (call $fmt4 (call $drv_convert_compact)
+      (call $runtime_import (local.get $m) (call $drv_with_context) (i32.const 0))
+      (call $get_text (local.get $m) (i32.const 40))
+      (local.get $expression) (local.get $expression_n)
+      (call $compact_field_context (local.get $m) (local.get $name) (local.get $name_n) (local.get $type) (local.get $type_n))))))
   (call $fmt3 (call $drv_convert_result)
     (call $runtime_import (local.get $m) (call $drv_with_context) (i32.const 0))
     (call $driver_context (i32.load offset=8 (local.get $plan)) (local.get $name) (local.get $name_n) (local.get $type) (local.get $type_n))
@@ -259,8 +296,12 @@
         (call $concat (call $concat (local.get $prefix) (local.get $prefix_n) (call $get_text (local.get $fields) (i32.const 16))) (call $drv_dot))))
       (else
         (call $set_text (local.get $fields) (i32.const 80)
-          (call $codec_context (local.get $m) (i32.load offset=8 (local.get $plan)) (local.get $fields)
-            (call $concat (local.get $prefix) (local.get $prefix_n) (call $get_text (local.get $fields) (i32.const 16)))))
+          (if (result i32 i32) (global.get $compact_active)
+            (then (call $compact_field_context (local.get $m)
+              (call $concat (local.get $prefix) (local.get $prefix_n) (call $get_text (local.get $fields) (i32.const 16)))
+              (call $type_text (local.get $fields))))
+            (else (call $codec_context (local.get $m) (i32.load offset=8 (local.get $plan)) (local.get $fields)
+              (call $concat (local.get $prefix) (local.get $prefix_n) (call $get_text (local.get $fields) (i32.const 16)))))))
         (i32.store offset=88 (local.get $fields) (global.get $driver_row_index))
         (global.set $driver_row_index (i32.add (global.get $driver_row_index) (i32.const 1)))
         (if (i32.gt_s (i32.load offset=40 (local.get $fields)) (i32.const 0))
@@ -289,7 +330,11 @@
     (local.set $fields (call $next (local.get $fields))) (br $loop))) (i32.const 0))
 (func $driver_postgres_raw (param $m i32) (param $plan i32) (param $bindings i32) (param $bindings_n i32)
   (param $sql i32) (param $sql_n i32) (param $parameters i32) (param $parameters_n i32) (local $start i32)
-  (call $line (call $fmt3 (call $drv_postgres_raw) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n) (local.get $parameters) (local.get $parameters_n)))
+  (if (global.get $compact_active)
+    (then (call $line (call $fmt1 (call $drv_shared_result)
+      (call $driver_shared_call (local.get $m) (call $c_query_raw)
+        (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)))))
+    (else (call $line (call $fmt3 (call $drv_postgres_raw) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n) (local.get $parameters) (local.get $parameters_n)))))
   (call $line (call $fmt1 (call $drv_raw_width) (call $decimal_i32 (call $field_count (i32.load offset=52 (local.get $plan))))))
   (global.set $driver_row_index (i32.const 0)) (global.set $driver_array_count (i32.const 0))
   (call $driver_prepare_contexts (local.get $m) (local.get $plan) (i32.load offset=52 (local.get $plan)) (i32.const 0) (i32.const 0))
@@ -301,8 +346,51 @@
   (local.set $start (global.get $txt_cursor)) (global.set $driver_join_count (i32.const 0))
   (call $driver_join_contexts (i32.load offset=52 (local.get $plan)) (i32.const 1))
   (call $line (call $fmt1 (call $drv_raw_array) (local.get $start) (i32.sub (global.get $txt_cursor) (local.get $start))))
-  (call $line (call $fmt1 (call $drv_raw_decode) (call $runtime_import (local.get $m) (call $drv_with_context) (i32.const 0))))
+  (if (global.get $compact_active)
+    (then (call $line (call $fmt2 (call $drv_raw_decode_compact)
+      (call $runtime_import (local.get $m) (call $drv_parse_raw) (i32.const 0))
+      (call $get_text (local.get $m) (i32.const 40)))))
+    (else (call $line (call $fmt1 (call $drv_raw_decode) (call $runtime_import (local.get $m) (call $drv_with_context) (i32.const 0))))))
   (call $dedent) (call $line (call $drv_raw_end)))
+
+
+(func $driver_shared_start (param $m i32) (param $name i32) (param $name_n i32)
+  (param $bindings i32) (param $bindings_n i32) (param $sql i32) (param $sql_n i32) (result i32 i32)
+  (call $fmt3 (call $drv_call_start)
+    (call $runtime_import (local.get $m) (local.get $name) (local.get $name_n) (i32.const 0))
+    (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n)))
+
+(func $driver_shared_call (param $m i32) (param $name i32) (param $name_n i32)
+  (param $bindings i32) (param $bindings_n i32) (param $sql i32) (param $sql_n i32) (result i32 i32)
+  (local $start i32) (local $p i32) (local $n i32)
+  (call $driver_shared_start (local.get $m) (local.get $name) (local.get $name_n)
+    (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (local.set $n) (local.set $p)
+  (local.set $start (call $text_mark)) (call $text_append (local.get $p) (local.get $n))
+  (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then
+    (call $text_append (call $drv_comma)) (call $text_append (call $bool_text (global.get $opt_mysql_support)))
+    (call $text_append (call $drv_comma)) (call $text_append (call $bool_text (global.get $opt_mysql_strings)))))
+  (call $text_append (call $drv_call_close)) (local.get $start) (i32.sub (global.get $txt_cursor) (local.get $start)))
+
+(func $driver_shared_rows (param $m i32) (param $plan i32)
+  (param $bindings i32) (param $bindings_n i32) (param $sql i32) (param $sql_n i32)
+  (local $cmd i32) (local $p i32) (local $n i32) (local $reader i32) (local $reader_n i32) (local $start i32)
+  (local.set $cmd (i32.load offset=12 (local.get $plan)))
+  (call $driver_shared_start (local.get $m)
+    (if (result i32 i32) (i32.eq (local.get $cmd) (i32.const 1)) (then (call $drv_query_one)) (else (call $drv_query_many)))
+    (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (local.set $n) (local.set $p)
+  (call $module_import (local.get $m) (call $c_compact_path)
+    (call $get_text (i32.load offset=76 (local.get $plan)) (i32.const 24)) (i32.const 0))
+  (local.set $reader_n) (local.set $reader)
+  (local.set $start (call $text_mark)) (call $text_append (local.get $p) (local.get $n))
+  (call $text_append (call $drv_comma)) (call $text_append (local.get $reader) (local.get $reader_n))
+  (call $text_append (call $drv_comma)) (call $text_append (call $get_text (local.get $m) (i32.const 40)))
+  (if (i32.eq (local.get $cmd) (i32.const 1)) (then
+    (call $text_append (call $drv_comma)) (call $text_append (call $null_text))))
+  (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then
+    (call $text_append (call $drv_comma)) (call $text_append (call $bool_text (global.get $opt_mysql_support)))
+    (call $text_append (call $drv_comma)) (call $text_append (call $bool_text (global.get $opt_mysql_strings)))))
+  (call $text_append (call $drv_call_close))
+  (call $line (call $fmt1 (call $drv_return_value) (local.get $start) (i32.sub (global.get $txt_cursor) (local.get $start)))))
 
 ;; The SQLite drivers share row conversion and write-result policy. Deno owns
 ;; and disposes the statement in finally; better-sqlite3 owns that lifetime.
@@ -311,10 +399,17 @@
   (local $cmd i32) (local $tuple i32) (local $tuple_n i32) (local $value i32) (local $value_n i32)
   (local $count i32) (local $i i32)
   (local.set $cmd (i32.load offset=12 (local.get $plan)))
+  (if (global.get $compact_active)
+    (then
+      (call $line (call $concat (call $drv_return_prefix)
+        (call $concat (call $driver_shared_start (local.get $m) (call $drv_run_query)
+          (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (call $drv_callback))))
+      (call $indent))
+    (else
   (if (local.get $deno)
     (then (call $line (call $fmt1 (call $drv_prepare) (local.get $sql) (local.get $sql_n)))
       (call $line (call $drv_try)) (call $indent) (call $line (call $drv_safe)))
-    (else (call $line (call $fmt1 (call $drv_prepare_safe) (local.get $sql) (local.get $sql_n)))))
+    (else (call $line (call $fmt1 (call $drv_prepare_safe) (local.get $sql) (local.get $sql_n)))))))
   (block $query_done
     (if (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1)) (then
       (call $runtime_import (local.get $m) (call $drv_sqlite_value) (i32.const 1)) (local.set $value_n) (local.set $value)
@@ -333,7 +428,8 @@
           (call $driver_rows (local.get $m) (local.get $plan)))) (br $query_done)))
     (if (i32.eq (local.get $cmd) (i32.const 3)) (then
       (call $line (call $fmt1 (call $drv_run) (local.get $bindings) (local.get $bindings_n))) (br $query_done)))
-    (call $line (call $fmt1 (call $drv_run_result) (local.get $bindings) (local.get $bindings_n)))
+    (if (i32.eqz (global.get $compact_active)) (then
+      (call $line (call $fmt1 (call $drv_run_result) (local.get $bindings) (local.get $bindings_n)))))
     (if (i32.eq (local.get $cmd) (i32.const 4)) (then
       (call $line (call $fmt1 (call $drv_return_value)
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_rows_affected) (call $drv_bigint) (call $drv_big_changes)))) (br $query_done)))
@@ -347,6 +443,8 @@
       (call $line (call $fmt2 (call $drv_return_result)
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_rows_affected) (call $drv_bigint) (call $drv_big_changes))
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_last_id) (call $drv_bigint) (call $drv_big_last)))))))
+  (if (global.get $compact_active) (then
+    (call $dedent) (call $line (call $drv_map_end)) (return)))
   (if (local.get $deno) (then
     (call $dedent) (call $line (call $drv_finally)) (call $indent) (call $line (call $drv_dispose)) (call $dedent) (call $line (call $drv_end)))))
 
@@ -358,6 +456,11 @@
   (local $prefix i32) (local $prefix_n i32) (local $conversion i32) (local $conversion_n i32)
   (local.set $cmd (i32.load offset=12 (local.get $plan)))
   (local.set $row_query (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1)))
+  (if (global.get $compact_active)
+    (then (call $line (call $fmt1 (call $drv_shared_result)
+      (call $driver_shared_call (local.get $m) (call $drv_run_query)
+        (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)))))
+    (else
   (if (local.get $row_query)
     (then
       (call $concat (call $module_import (local.get $m) (call $opt_driver_specifier) (call $drv_row_packet) (i32.const 1)) (call $drv_empty_bindings))
@@ -374,7 +477,7 @@
   (call $line (call $fmt1 (call $drv_mysql_array) (call $bool_text (local.get $row_query))))
   (call $line (call $fmt1 (call $drv_mysql_big) (call $bool_text (global.get $opt_mysql_support))))
   (call $line (call $fmt1 (call $drv_mysql_strings) (call $bool_text (global.get $opt_mysql_strings))))
-  (call $dedent) (call $line (call $drv_map_end))
+  (call $dedent) (call $line (call $drv_map_end))))
   (if (local.get $row_query) (then (call $driver_rows (local.get $m) (local.get $plan)) (return)))
   (if (i32.eq (local.get $cmd) (i32.const 4)) (then
     (call $line (call $fmt1 (call $drv_return_value)
@@ -401,6 +504,16 @@
   (local $cmd i32) (local $parameters i32) (local $parameters_n i32)
   (local.set $cmd (i32.load offset=12 (local.get $plan)))
   (if (i32.eqz (local.get $bindings_n)) (then (call $drv_empty_bindings) (local.set $bindings_n) (local.set $bindings)))
+  (if (global.get $compact_active) (then
+    (if (i32.eq (local.get $cmd) (i32.const 3)) (then
+      (call $line (call $fmt1 (call $drv_return_value)
+        (call $driver_shared_call (local.get $m) (call $drv_execute_query)
+          (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)))) (return)))
+    (if (i32.and (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1))
+      (i32.eqz (i32.and (i32.eq (global.get $opt_driver) (i32.const 2))
+        (call $driver_has_arrays (i32.load offset=52 (local.get $plan)))))) (then
+      (call $driver_shared_rows (local.get $m) (local.get $plan)
+        (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (return)))))
   (if (i32.ge_u (global.get $opt_driver) (i32.const 4)) (then
     (call $driver_sqlite (local.get $m) (local.get $plan) (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)
       (i32.eq (global.get $opt_driver) (i32.const 5))) (return)))
@@ -409,7 +522,12 @@
   (if (i32.eq (global.get $opt_driver) (i32.const 1)) (then
     (if (i32.eq (local.get $cmd) (i32.const 3)) (then
       (call $line (call $fmt2 (call $drv_pg_exec) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n))) (return)))
-    (call $line (call $fmt2 (call $drv_pg_result) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n)))
+    (if (global.get $compact_active)
+      (then (call $line (call $fmt1 (call $drv_shared_result)
+        (call $driver_shared_call (local.get $m) (call $drv_run_query)
+          (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)))))
+      (else
+    (call $line (call $fmt2 (call $drv_pg_result) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n)))))
     (if (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1)) (then
       (call $line (call $drv_pg_rows)) (call $driver_rows (local.get $m) (local.get $plan)) (return)))
     (if (i32.eq (local.get $cmd) (i32.const 4)) (then
@@ -421,14 +539,20 @@
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_rows_affected) (call $drv_bigint)
           (call $fmt1 (call $drv_pg_count) (call $runtime_import (local.get $m) (call $drv_integer_result) (i32.const 0)))))))) (return)))
   (if (i32.eq (global.get $opt_driver) (i32.const 2)) (then
-    (call $runtime_import (local.get $m) (call $drv_driver_parameters) (i32.const 1)) (local.set $parameters_n) (local.set $parameters)
+    (if (i32.eqz (global.get $compact_active)) (then
+    (call $runtime_import (local.get $m) (call $drv_driver_parameters) (i32.const 1)) (local.set $parameters_n) (local.set $parameters)))
     (if (i32.eq (local.get $cmd) (i32.const 3)) (then
       (call $line (call $fmt3 (call $drv_postgres_exec) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n) (local.get $parameters) (local.get $parameters_n))) (return)))
     (if (i32.and (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1))
       (call $driver_has_arrays (i32.load offset=52 (local.get $plan)))) (then
       (call $driver_postgres_raw (local.get $m) (local.get $plan) (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n) (local.get $parameters) (local.get $parameters_n))
       (call $driver_rows (local.get $m) (local.get $plan)) (return)))
-    (call $line (call $fmt3 (call $drv_postgres_values) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n) (local.get $parameters) (local.get $parameters_n)))
+    (if (global.get $compact_active)
+      (then (call $line (call $fmt1 (call $drv_shared_rows)
+        (call $driver_shared_call (local.get $m) (call $drv_run_query)
+          (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)))))
+      (else
+    (call $line (call $fmt3 (call $drv_postgres_values) (local.get $sql) (local.get $sql_n) (local.get $bindings) (local.get $bindings_n) (local.get $parameters) (local.get $parameters_n)))))
     (if (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1)) (then (call $driver_rows (local.get $m) (local.get $plan)) (return)))
     (if (i32.eq (local.get $cmd) (i32.const 4)) (then
       (call $line (call $fmt1 (call $drv_return_value)

@@ -119,7 +119,14 @@ Deno.test("asset files normalize line endings and reject invalid UTF-8", async (
   try {
     await Deno.mkdir(new URL("src/templates/", root), { recursive: true });
     await Deno.writeTextFile(constants, '{\r\n  "name": "é"\r\n}\r\n');
-    for (const name of Object.keys(emptyTemplates)) {
+    for (
+      const name of [
+        ...Object.keys(emptyTemplates),
+        "execution_sqlite",
+        "execution_postgresql",
+        "execution_mysql",
+      ]
+    ) {
       await Deno.writeTextFile(new URL(`src/templates/${name}.ts`, root), "");
     }
     await Deno.writeTextFile(runtime, source);

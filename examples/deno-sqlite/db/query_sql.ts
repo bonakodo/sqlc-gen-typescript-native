@@ -2,8 +2,8 @@
 
 import type { Args0 as _Args0, Args2 as _Args2, Row1 as _Row1 } from "./query_helpers.ts";
 import { bind0 as _bind0, bind2 as _bind2, f0 as _f0, read1 as _read1 } from "./query_helpers.ts";
-import { codecContext as _codecContext, withCodecContext as _withCodecContext } from "./runtime_common.ts";
-import type { SqliteValue as _SqliteValue } from "./runtime_sqlite.ts";
+import { withCodecContext as _withCodecContext } from "./runtime_common.ts";
+import { queryMany as _queryMany, queryOne as _queryOne, runQuery as _runQuery } from "./runtime_sqlite.ts";
 import type { Database as _Database } from "@bonakodo/sqlite";
 
 const _file = "query.sql";
@@ -18,16 +18,8 @@ export interface CreateAuthorRow extends _Row1 {}
 
 export function createAuthor(database: _Database, args: CreateAuthorArgs): CreateAuthorRow | null {
   const _q = ["CreateAuthor", _file] as const;
-  const [_p1, _p2, _p3] = _bind0(args, _q);
-  const stmt = database.prepare(createAuthorQuery);
-  try {
-    stmt.safeIntegers();
-    const row = stmt.raw().get([_p1, _p2, _p3]) as [_SqliteValue, _SqliteValue, _SqliteValue] | undefined;
-    if (row === undefined) return null;
-    return _read1(row, _q);
-  } finally {
-    stmt[Symbol.dispose]();
-  }
+  const _sqlcBindings = _bind0(args, _q);
+  return _queryOne(database, createAuthorQuery, _sqlcBindings, _read1, _q, null);
 }
 
 export const deleteAuthorQuery = `-- name: DeleteAuthor :execrows
@@ -37,15 +29,10 @@ export interface DeleteAuthorArgs extends _Args2 {}
 
 export function deleteAuthor(database: _Database, args: DeleteAuthorArgs): bigint {
   const _q = ["DeleteAuthor", _file] as const;
-  const [_p1] = _bind2(args, _q);
-  const stmt = database.prepare(deleteAuthorQuery);
-  try {
-    stmt.safeIntegers();
-    const result = stmt.run([_p1]);
-    return _withCodecContext(_codecContext(_q, _f0), "decode", () => BigInt(result.changes));
-  } finally {
-    stmt[Symbol.dispose]();
-  }
+  const _sqlcBindings = _bind2(args, _q);
+  return _runQuery(database, deleteAuthorQuery, _sqlcBindings, (result) => {
+    return _withCodecContext(_q, "decode", () => BigInt(result.changes), _f0);
+  });
 }
 
 export const listAuthorsQuery = `-- name: ListAuthors :many
@@ -55,12 +42,5 @@ export interface ListAuthorsRow extends _Row1 {}
 
 export function listAuthors(database: _Database): ListAuthorsRow[] {
   const _q = ["ListAuthors", _file] as const;
-  const stmt = database.prepare(listAuthorsQuery);
-  try {
-    stmt.safeIntegers();
-    const rows = stmt.raw().all([]) as [_SqliteValue, _SqliteValue, _SqliteValue][];
-    return rows.map(row => _read1(row, _q));
-  } finally {
-    stmt[Symbol.dispose]();
-  }
+  return _queryMany(database, listAuthorsQuery, [], _read1, _q);
 }
