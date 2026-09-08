@@ -1,0 +1,45 @@
+{
+  "tasks": {
+    "tools": "./tools/setup-wasm-tools.sh",
+    "build": "./tools/build.sh",
+    "test": "./tools/test.sh",
+    "check": "deno fmt --check && deno lint && deno check tests/wasm/*.ts tests/tools/*.ts tools/*.ts && deno task test",
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "integration": "./tools/test-integration.sh",
+    "live": "./tools/test-server-live.sh",
+    "runtime": "./tools/test-runtime.sh"
+  },
+  "compilerOptions": {
+    "strict": true
+  },
+  "fmt": {
+    "include": [
+      "deno.json",
+      "tools/*.ts",
+      "tests/wasm/*.ts",
+      "tests/integration/*.ts",
+      "tests/runtime/*.ts",
+      "tests/tools/*.ts"
+    ]
+  },
+  "lint": {
+    "include": [
+      "tools/*.ts",
+      "tests/wasm/*.ts",
+      "tests/integration/*.ts",
+      "tests/runtime/*.ts",
+      "tests/tools/*.ts"
+    ]
+  },
+  "exclude": [
+    "bin/",
+    "tests/integration/.generated/",
+    "tests/integration/node_modules/",
+    "tests/runtime/.generated/"
+  ],
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1.0.19",
+    "@std/path": "jsr:@std/path@1.1.6"
+  }
+}

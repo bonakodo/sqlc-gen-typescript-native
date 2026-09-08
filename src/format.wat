@@ -1,0 +1,76 @@
+;; A small text formatter used only by the generator's trusted templates.
+;; Every argument is already text (quoted strings, decimal integers, booleans,
+;; or source fragments). Thus the formatter has no reflection, interfaces,
+;; varargs objects, numeric formatting library, or temporary heap buffers.
+;;
+;; Argument pairs occupy 20,480..20,543 until format returns. Callers evaluate
+;; argument expressions BEFORE entering a formatN wrapper, so nested formats
+;; cannot overwrite an outer call's live argument array.
+(func $format (param $p i32) (param $n i32) (param $count i32) (result i32 i32)
+  (local $start i32) (local $end i32) (local $part i32) (local $arg i32)
+  (local $a i32) (local $kind i32)
+  (local.set $start (global.get $txt_cursor))
+  (local.set $end (i32.add (local.get $p) (local.get $n)))
+  (local.set $part (local.get $p))
+  (block $done (loop $scan
+    (br_if $done (i32.ge_u (local.get $p) (local.get $end)))
+    (if (i32.eq (i32.load8_u (local.get $p)) (i32.const 37)) (then
+      (call $text_append (local.get $part) (i32.sub (local.get $p) (local.get $part)))
+      (local.set $p (i32.add (local.get $p) (i32.const 1)))
+      (if (i32.ge_u (local.get $p) (local.get $end)) (then (call $fail (i32.const 14))))
+      (local.set $kind (i32.load8_u (local.get $p)))
+      (if (i32.eq (local.get $kind) (i32.const 37))
+        (then (call $text_append (local.get $p) (i32.const 1)))
+        (else
+          (if (i32.ge_u (local.get $arg) (local.get $count)) (then (call $fail (i32.const 14))))
+          ;; All conversion happens at the call site. The letter is retained
+          ;; in templates to make their origin and argument intent readable.
+          (if (i32.eqz (i32.or (i32.or (i32.eq (local.get $kind) (i32.const 115)) (i32.eq (local.get $kind) (i32.const 100)))
+                               (i32.or (i32.eq (local.get $kind) (i32.const 113)) (i32.eq (local.get $kind) (i32.const 116)))))
+            (then (call $fail (i32.const 14))))
+          (local.set $a (i32.add (i32.const 20480) (i32.shl (local.get $arg) (i32.const 3))))
+          (call $text_append (i32.load (local.get $a)) (i32.load offset=4 (local.get $a)))
+          (local.set $arg (i32.add (local.get $arg) (i32.const 1)))))
+      (local.set $part (i32.add (local.get $p) (i32.const 1)))))
+    (local.set $p (i32.add (local.get $p) (i32.const 1)))
+    (br $scan)))
+  (call $text_append (local.get $part) (i32.sub (local.get $end) (local.get $part)))
+  (if (i32.ne (local.get $arg) (local.get $count)) (then (call $fail (i32.const 14))))
+  (local.get $start) (i32.sub (global.get $txt_cursor) (local.get $start)))
+
+(func $fmt_arg (param $i i32) (param $p i32) (param $n i32) (local $a i32)
+  (local.set $a (i32.add (i32.const 20480) (i32.shl (local.get $i) (i32.const 3))))
+  (i32.store (local.get $a) (local.get $p)) (i32.store offset=4 (local.get $a) (local.get $n)))
+(func $fmt1 (param $p i32) (param $n i32) (param $a i32) (param $an i32) (result i32 i32)
+  (call $fmt_arg (i32.const 0) (local.get $a) (local.get $an))
+  (call $format (local.get $p) (local.get $n) (i32.const 1)))
+(func $fmt2 (param $p i32) (param $n i32) (param $a i32) (param $an i32) (param $b i32) (param $bn i32) (result i32 i32)
+  (call $fmt_arg (i32.const 0) (local.get $a) (local.get $an))
+  (call $fmt_arg (i32.const 1) (local.get $b) (local.get $bn))
+  (call $format (local.get $p) (local.get $n) (i32.const 2)))
+(func $fmt3 (param $p i32) (param $n i32) (param $a i32) (param $an i32) (param $b i32) (param $bn i32) (param $c i32) (param $cn i32) (result i32 i32)
+  (call $fmt_arg (i32.const 0) (local.get $a) (local.get $an))
+  (call $fmt_arg (i32.const 1) (local.get $b) (local.get $bn))
+  (call $fmt_arg (i32.const 2) (local.get $c) (local.get $cn))
+  (call $format (local.get $p) (local.get $n) (i32.const 3)))
+(func $fmt4 (param $p i32) (param $n i32) (param $a i32) (param $an i32) (param $b i32) (param $bn i32) (param $c i32) (param $cn i32) (param $d i32) (param $dn i32) (result i32 i32)
+  (call $fmt_arg (i32.const 0) (local.get $a) (local.get $an))
+  (call $fmt_arg (i32.const 1) (local.get $b) (local.get $bn))
+  (call $fmt_arg (i32.const 2) (local.get $c) (local.get $cn))
+  (call $fmt_arg (i32.const 3) (local.get $d) (local.get $dn))
+  (call $format (local.get $p) (local.get $n) (i32.const 4)))
+(func $fmt5 (param $p i32) (param $n i32) (param $a i32) (param $an i32) (param $b i32) (param $bn i32) (param $c i32) (param $cn i32) (param $d i32) (param $dn i32) (param $e i32) (param $en i32) (result i32 i32)
+  (call $fmt_arg (i32.const 0) (local.get $a) (local.get $an))
+  (call $fmt_arg (i32.const 1) (local.get $b) (local.get $bn))
+  (call $fmt_arg (i32.const 2) (local.get $c) (local.get $cn))
+  (call $fmt_arg (i32.const 3) (local.get $d) (local.get $dn))
+  (call $fmt_arg (i32.const 4) (local.get $e) (local.get $en))
+  (call $format (local.get $p) (local.get $n) (i32.const 5)))
+(func $fmt6 (param $p i32) (param $n i32) (param $a i32) (param $an i32) (param $b i32) (param $bn i32) (param $c i32) (param $cn i32) (param $d i32) (param $dn i32) (param $e i32) (param $en i32) (param $f i32) (param $fn i32) (result i32 i32)
+  (call $fmt_arg (i32.const 0) (local.get $a) (local.get $an))
+  (call $fmt_arg (i32.const 1) (local.get $b) (local.get $bn))
+  (call $fmt_arg (i32.const 2) (local.get $c) (local.get $cn))
+  (call $fmt_arg (i32.const 3) (local.get $d) (local.get $dn))
+  (call $fmt_arg (i32.const 4) (local.get $e) (local.get $en))
+  (call $fmt_arg (i32.const 5) (local.get $f) (local.get $fn))
+  (call $format (local.get $p) (local.get $n) (i32.const 6)))
