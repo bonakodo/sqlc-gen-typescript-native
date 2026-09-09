@@ -27,6 +27,15 @@ pinned test dependencies with `npm ci`; Bun's install hook selects its platform
 binary. These packages only test generated TypeScript and do not build the
 plugin.
 
+Statement-cache runtime tests use the published SQLite driver, including a
+virtual-table reset failure and a disposal rejected inside a SQLite callback.
+They check exclusive leases, LRU limits, cross-module sharing, disabled caching,
+shrink/clear during nested calls, schema rebuilds, stale handles, rollback,
+external iterators, and close. Stubs separately inject setup and cleanup failures
+and sustained churn. The binding suite checks that fixed encoder calls validate
+before execution, including after inlining their single-use locals. Stable-name
+tests insert unrelated queries and exercise a real hash collision.
+
 The ignored `.generated/` directory holds generated modules for inspection. Run
 the generation suites after `deno task build` to test generation alone:
 

@@ -30,6 +30,481 @@ const baseSchema = (engine: string) =>
     "utf8",
   );
 
+const temporaryAuthors =
+  "CREATE TEMPORARY TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT, score DOUBLE PRECISION NOT NULL DEFAULT 0)";
+
+// Use server counters, rather than driver-private cache fields: deleting a JS
+// entry alone does not establish that the server released its statement.
+async function mysqlStatus(connection: mysql.Connection, global = false) {
+  const [rows] = await connection.query<mysql.RowDataPacket[]>(
+    `SHOW ${
+      global ? "GLOBAL" : "SESSION"
+    } STATUS WHERE Variable_name IN ('Com_stmt_prepare', 'Com_stmt_close', 'Com_stmt_reprepare', 'Prepared_stmt_count')`,
+  );
+  return Object.fromEntries(
+    rows.map((row) => [String(row.Variable_name), Number(row.Value)]),
+  ) as Record<string, number>;
+}
+
+test(
+  "live pg: unnamed execution preserves pool ownership, errors, DDL, transactions, and connection replacement",
+  { skip: !enabled },
+  async (t) => {
+    const q = await existing("node-pg");
+    const pool = new pg.Pool({ connectionString: pgURL, max: 2 });
+    let ended = false;
+    t.after(async () => {
+      if (!ended) await pool.end();
+    });
+    const clients = await Promise.all([pool.connect(), pool.connect()]);
+    try {
+      for (const [index, client] of clients.entries()) {
+        await client.query(temporaryAuthors);
+        await q.createAuthor(client, {
+          id: 1,
+          name: `connection ${index}`,
+          bio: null,
+          score: 0,
+        });
+      }
+      const rows = await Promise.all(
+        clients.flatMap((client) => [
+          q.getAuthor(client, { id: 1 }),
+          q.getAuthor(client, { id: 2 }),
+        ]),
+      );
+      assert.deepEqual(rows.map((row) => row?.name ?? null), [
+        "connection 0",
+        null,
+        "connection 1",
+        null,
+      ]);
+      const client = clients[0]!;
+      await assert.rejects(q.getAuthor(client, {}), {
+        name: "QueryCodecError",
+      });
+      await assert.rejects(
+        q.createAuthor(client, {
+          id: 1,
+          name: "duplicate",
+          bio: null,
+          score: 0,
+        }),
+        { code: "23505" },
+      );
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "connection 0");
+      await client.query("BEGIN");
+      await q.renameAuthor(client, { id: 1, name: "transaction" });
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "transaction");
+      await client.query("ROLLBACK");
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "connection 0");
+      await client.query("ALTER TABLE authors ADD COLUMN extra TEXT");
+      assert.equal((await q.listAuthors(client)).length, 1);
+      await client.query("ALTER TABLE authors RENAME COLUMN name TO old_name");
+      await assert.rejects(q.getAuthor(client, { id: 1 }), { code: "42703" });
+      await client.query("ALTER TABLE authors RENAME COLUMN old_name TO name");
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "connection 0");
+      await client.query("RESET ALL");
+      const before = process.memoryUsage();
+      const started = performance.now();
+      for (let index = 0; index < 200; index++) {
+        assert.equal((await q.getAuthor(client, { id: 1 })).id, 1);
+      }
+      const milliseconds = performance.now() - started;
+      for (const connection of clients) {
+        assert.deepEqual(
+          (await connection.query("SELECT name FROM pg_prepared_statements"))
+            .rows,
+          [],
+        );
+      }
+      const after = process.memoryUsage();
+      console.log(JSON.stringify({
+        driver: "pg",
+        server:
+          (await client.query("SHOW server_version")).rows[0].server_version,
+        policy: "unnamed (generated default)",
+        calls: 200,
+        milliseconds,
+        retainedNamedStatements: 0,
+        rssDelta: after.rss - before.rss,
+        heapUsedDelta: after.heapUsed - before.heapUsed,
+      }));
+    } finally {
+      for (const client of clients) client.release(true);
+    }
+    try {
+      const live = await generated("pg");
+      assert.deepEqual(
+        await Promise.all(
+          Array.from(
+            { length: 8 },
+            (_, index) => live.literalProbe(pool, { arg1: String(index) }),
+          ),
+        ),
+        Array.from(
+          { length: 8 },
+          (_, index) => ({ literal: "?", value: String(index) }),
+        ),
+      );
+    } finally {
+      await pool.end();
+      ended = true;
+    }
+    await assert.rejects(q.getAuthor(pool, { id: 1 }), /after calling end/);
+  },
+);
+
+test(
+  "live postgres.js: unsafe defaults, reserved connections, concurrent transactions, cursor ownership, and reconnects",
+  { skip: !enabled },
+  async (t) => {
+    const q = await existing("node-postgres");
+    const live = await generated("postgres");
+    const sql = postgres(pgURL, { max: 2, prepare: true });
+    t.after(() => sql.end());
+    const reserved = await Promise.all([sql.reserve(), sql.reserve()]);
+    const preparationSnapshot = async (connection: postgres.ReservedSql) =>
+      Array.from(
+        await connection.unsafe(
+          "SELECT name, statement FROM pg_prepared_statements ORDER BY name",
+        ),
+        ({ name, statement }) => ({ name, statement }),
+      );
+    const preparationBaseline = await Promise.all(
+      reserved.map(preparationSnapshot),
+    );
+    try {
+      for (const [index, connection] of reserved.entries()) {
+        await connection.unsafe(temporaryAuthors);
+        await q.createAuthor(connection, {
+          id: 1,
+          name: `connection ${index}`,
+          bio: null,
+          score: 0,
+        });
+      }
+      const results = await Promise.all(
+        reserved.map((connection) => q.getAuthor(connection, { id: 1 })),
+      );
+      assert.deepEqual(results.map((row) => row.name), [
+        "connection 0",
+        "connection 1",
+      ]);
+      const connection = reserved[0]!;
+      await assert.rejects(q.getAuthor(connection, {}), {
+        name: "QueryCodecError",
+      });
+      await assert.rejects(
+        q.createAuthor(connection, {
+          id: 1,
+          name: "duplicate",
+          bio: null,
+          score: 0,
+        }),
+        { code: "23505" },
+      );
+      await connection.unsafe(
+        "ALTER TABLE authors RENAME COLUMN name TO old_name",
+      );
+      await assert.rejects(q.getAuthor(connection, { id: 1 }), {
+        code: "42703",
+      });
+      await connection.unsafe(
+        "ALTER TABLE authors RENAME COLUMN old_name TO name",
+      );
+      assert.equal(
+        (await q.getAuthor(connection, { id: 1 })).name,
+        "connection 0",
+      );
+      const before = process.memoryUsage();
+      const started = performance.now();
+      for (let index = 0; index < 200; index++) {
+        assert.equal((await q.getAuthor(connection, { id: 1 })).id, 1);
+      }
+      const milliseconds = performance.now() - started;
+      assert.deepEqual(
+        await Promise.all(reserved.map(preparationSnapshot)),
+        preparationBaseline,
+      );
+      const after = process.memoryUsage();
+      console.log(JSON.stringify({
+        driver: "postgres.js",
+        policy:
+          "unsafe prepare:false (generated default), connection prepare:true",
+        calls: 200,
+        milliseconds,
+        retainedGeneratedStatements: 0,
+        retainedDriverStartupStatements: preparationBaseline[0]!.length,
+        rssDelta: after.rss - before.rss,
+        heapUsedDelta: after.heapUsed - before.heapUsed,
+      }));
+      // A driver-owned cursor keeps one physical connection busy. Generated
+      // reads on another reserved connection must neither close nor steal it.
+      let cursorRows = 0;
+      for await (
+        const rows of connection.unsafe("SELECT generate_series(1, 3) AS id")
+          .cursor(1)
+      ) {
+        cursorRows += rows.length;
+        assert.equal(
+          (await q.getAuthor(reserved[1], { id: 1 })).name,
+          "connection 1",
+        );
+      }
+      assert.equal(cursorRows, 3);
+    } finally {
+      for (const connection of reserved) connection.release();
+    }
+    try {
+      await Promise.all([0, 1].map(async (index) => {
+        await assert.rejects(
+          sql.begin(async (tx) => {
+            await q.renameAuthor(tx, { id: 1, name: `rollback ${index}` });
+            assert.equal(
+              (await q.getAuthor(tx, { id: 1 })).name,
+              `rollback ${index}`,
+            );
+            throw new Error("rollback lifetime test");
+          }),
+          /rollback lifetime test/,
+        );
+      }));
+      // Use the documented idle lifetime to replace a physical connection
+      // while keeping the same pool handle. The driver's internal close()
+      // method is absent from its published Sql type and is not used here.
+      let closeIdle = () => {};
+      const idleClosed = new Promise<void>((resolve) => {
+        closeIdle = resolve;
+      });
+      const reconnecting = postgres(pgURL, {
+        max: 1,
+        idle_timeout: 0.02,
+        onclose: () => closeIdle(),
+      });
+      try {
+        const [before] = await reconnecting.unsafe(
+          "SELECT pg_backend_pid() AS pid",
+        );
+        await idleClosed;
+        assert.equal(
+          (await live.literalProbe(reconnecting, { arg1: "reconnected" }))
+            .value,
+          "reconnected",
+        );
+        const [after] = await reconnecting.unsafe(
+          "SELECT pg_backend_pid() AS pid",
+        );
+        assert.notEqual(after?.pid, before?.pid);
+      } finally {
+        await reconnecting.end();
+      }
+    } finally {
+      await sql.end();
+    }
+    await assert.rejects(
+      live.literalProbe(sql, { arg1: "closed" }),
+      /CONNECTION_ENDED/,
+    );
+  },
+);
+
+test(
+  "live mysql2: driver LRU bounds SQL variants, closes evictions, and preserves reset and pool ownership",
+  { skip: !enabled },
+  async (t) => {
+    const q = await existing("node-mysql2");
+    const live = await generated("mysql2");
+    const observer = await mysql.createConnection(mysqlURL);
+    t.after(() => observer.end());
+    const baseline = (await mysqlStatus(observer, true)).Prepared_stmt_count!;
+    const pool = mysql.createPool({
+      uri: mysqlURL,
+      connectionLimit: 2,
+      maxPreparedStatements: 3,
+    });
+    const clients = await Promise.all([
+      pool.getConnection(),
+      pool.getConnection(),
+    ]);
+    try {
+      for (const [index, client] of clients.entries()) {
+        await client.query(temporaryAuthors);
+        await q.insertAuthor(client, { id: 1, name: `connection ${index}` });
+      }
+      const results = await Promise.all(clients.flatMap((client) => [
+        q.getAuthor(client, { id: 1 }),
+        q.getAuthor(client, { id: 2 }),
+      ]));
+      assert.deepEqual(results.map((row) => row?.name ?? null), [
+        "connection 0",
+        null,
+        "connection 1",
+        null,
+      ]);
+      const client = clients[0]!;
+      const initial = await mysqlStatus(client);
+      await assert.rejects(q.getAuthor(client, {}), {
+        name: "QueryCodecError",
+      });
+      assert.equal(
+        (await mysqlStatus(client)).Com_stmt_prepare,
+        initial.Com_stmt_prepare,
+      );
+      await assert.rejects(
+        q.insertAuthor(client, { id: 1, name: "duplicate" }),
+        { code: "ER_DUP_ENTRY" },
+      );
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "connection 0");
+      await client.beginTransaction();
+      await q.renameAuthor(client, { id: 1, name: "transaction" });
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "transaction");
+      await client.rollback();
+      const beforeReuse = await mysqlStatus(client);
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "connection 0");
+      assert.equal(
+        (await mysqlStatus(client)).Com_stmt_prepare,
+        beforeReuse.Com_stmt_prepare,
+      );
+      await client.query("ALTER TABLE authors ADD COLUMN extra TEXT");
+      assert.equal((await q.getAuthor(client, { id: 1 })).id, 1);
+      await client.query("ALTER TABLE authors RENAME COLUMN name TO old_name");
+      await assert.rejects(q.getAuthor(client, { id: 1 }), {
+        code: "ER_BAD_FIELD_ERROR",
+      });
+      await client.query("ALTER TABLE authors RENAME COLUMN old_name TO name");
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "connection 0");
+
+      const before = process.memoryUsage();
+      const stats = await mysqlStatus(client);
+      const started = performance.now();
+      for (let index = 0; index < 200; index++) {
+        assert.equal((await q.getAuthor(client, { id: 1 })).id, 1);
+      }
+      const milliseconds = performance.now() - started;
+      assert.equal(
+        (await mysqlStatus(client)).Com_stmt_prepare,
+        stats.Com_stmt_prepare,
+      );
+      const after = process.memoryUsage();
+      const lruBefore = await mysqlStatus(client);
+      for (const length of [1, 2, 3, 1, 4, 1, 2]) {
+        assert.equal(
+          (await q.findAuthors(client, { ids: Array(length).fill(1) })).length,
+          1,
+        );
+      }
+      // Accessing variant 1 keeps it live; adding 4 evicts variant 2, which
+      // needs preparation when requested again. FIFO would prepare 1 again.
+      assert.equal(
+        (await mysqlStatus(client)).Com_stmt_prepare! -
+          lruBefore.Com_stmt_prepare!,
+        5,
+      );
+      const churnBefore = await mysqlStatus(client);
+      for (let index = 0; index < 120; index++) {
+        assert.equal(
+          (await q.findAuthors(client, { ids: Array(index + 10).fill(1) }))
+            .length,
+          1,
+        );
+        await mysqlStatus(client);
+        assert(
+          (await mysqlStatus(observer, true)).Prepared_stmt_count! <=
+            baseline + 6,
+        );
+      }
+      const churnAfter = await mysqlStatus(client);
+      assert.equal(
+        churnAfter.Com_stmt_prepare! - churnBefore.Com_stmt_prepare!,
+        120,
+      );
+      assert(churnAfter.Com_stmt_close! - churnBefore.Com_stmt_close! >= 117);
+      console.log(JSON.stringify({
+        driver: "mysql2",
+        server: (await client.query<mysql.RowDataPacket[]>(
+          "SELECT VERSION() AS version",
+        ))[0][0]!.version,
+        policy: "execute driver LRU, capacity 3 per physical connection",
+        calls: 200,
+        milliseconds,
+        repeatPreparations: 0,
+        churnPreparations: churnAfter.Com_stmt_prepare! -
+          churnBefore.Com_stmt_prepare!,
+        churnCloses: churnAfter.Com_stmt_close! - churnBefore.Com_stmt_close!,
+        retainedStatementBound: 6,
+        rssDelta: after.rss - before.rss,
+        heapUsedDelta: after.heapUsed - before.heapUsed,
+      }));
+      await client.reset();
+      await client.query(temporaryAuthors);
+      await q.insertAuthor(client, { id: 1, name: "after reset" });
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "after reset");
+      const beforeUnprepare = await mysqlStatus(client);
+      client.unprepare({ sql: q.getAuthorQuery, rowsAsArray: true });
+      assert.equal(
+        (await mysqlStatus(client)).Com_stmt_close! -
+          beforeUnprepare.Com_stmt_close!,
+        1,
+      );
+      assert.equal((await q.getAuthor(client, { id: 1 })).name, "after reset");
+      assert.equal(
+        (await mysqlStatus(client)).Com_stmt_prepare! -
+          beforeUnprepare.Com_stmt_prepare!,
+        1,
+      );
+      const beforeRelease = await mysqlStatus(client);
+      client.release();
+      const returned = await pool.getConnection();
+      assert.equal(
+        (await q.getAuthor(returned, { id: 1 })).name,
+        "after reset",
+      );
+      assert.equal(
+        (await mysqlStatus(returned)).Com_stmt_prepare,
+        beforeRelease.Com_stmt_prepare,
+      );
+      returned.release();
+      clients[1]!.release();
+      assert.equal(
+        (await live.literalProbe(pool, { arg1: "pool" })).value,
+        "pool",
+      );
+    } finally {
+      await pool.end();
+    }
+    // COM_STMT_CLOSE has no acknowledgement. A round trip on each owning
+    // connection above orders eviction; after pool.end(), poll the server.
+    for (let attempt = 0; attempt < 20; attempt++) {
+      if (
+        (await mysqlStatus(observer, true)).Prepared_stmt_count === baseline
+      ) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(
+      (await mysqlStatus(observer, true)).Prepared_stmt_count,
+      baseline,
+    );
+    await assert.rejects(
+      live.literalProbe(pool, { arg1: "closed" }),
+      /Pool is closed/,
+    );
+    const replacement = await mysql.createConnection({
+      uri: mysqlURL,
+      maxPreparedStatements: 1,
+    });
+    try {
+      assert.equal(
+        (await live.literalProbe(replacement, { arg1: "new connection" }))
+          .value,
+        "new connection",
+      );
+    } finally {
+      await replacement.end();
+    }
+  },
+);
+
 test(
   "live PostgreSQL: pg and postgres.js preserve JSON, arrays, geometry, shared binds, CRUD, and transactions",
   { skip: !enabled },

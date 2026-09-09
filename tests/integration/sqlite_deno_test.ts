@@ -5,6 +5,11 @@ import * as compat from "./.generated/deno-db-sqlite/wasm/query_sql.ts";
 import * as optional from "./.generated/undefined/wasm/query_sql.ts";
 import { QueryCodecError } from "./.generated/native-db-sqlite/wasm/codec_error.ts";
 
+import {
+  clearStatementCache,
+  configureStatementCache,
+} from "./.generated/native-db-sqlite/wasm/runtime_sqlite.ts";
+
 const schema = await Deno.readTextFile(
   new URL("../fixtures/sqlite/schema.sql", import.meta.url),
 );
@@ -118,9 +123,10 @@ Deno.test("@bonakodo/sqlite default types follow driver number and string values
   }
 });
 
-Deno.test("generated SQLite queries dispose statements after success and errors", () => {
+Deno.test("generated SQLite queries dispose uncached statements after success and errors", () => {
   using database = new Database(":memory:");
   database.exec(schema);
+  configureStatementCache(database, 0);
   const statements: { run(): unknown }[] = [];
   const prepare = database.prepare.bind(database);
   database.prepare = <T>(sql: string) => {
@@ -141,4 +147,49 @@ Deno.test("generated SQLite queries dispose statements after success and errors"
   for (const statement of statements) {
     assert.throws(() => statement.run(), /finalized/);
   }
+});
+
+Deno.test("generated arguments validate before leasing and slices stay bounded", () => {
+  using database = new Database(":memory:");
+  database.exec(schema);
+  configureStatementCache(database, 2);
+  let prepared = 0;
+  let disposed = 0;
+  const prepare = database.prepare.bind(database);
+  database.prepare = <T>(sql: string) => {
+    prepared++;
+    const stmt = prepare<T>(sql);
+    const dispose = stmt[Symbol.dispose].bind(stmt);
+    stmt[Symbol.dispose] = () => {
+      disposed++;
+      dispose();
+    };
+    return stmt;
+  };
+  queries.insertAuthor(database, { id: 1n, name: "a" });
+  queries.insertAuthor(database, { id: 2n, name: "b" });
+  assert.equal(prepared, 1);
+  const invalid = {
+    id: "private supplied value",
+    name: "private name",
+  } as unknown as Parameters<typeof queries.insertAuthor>[1];
+  assert.throws(() => queries.insertAuthor(database, invalid), (error) => {
+    assert(error instanceof QueryCodecError);
+    assert.equal(error.phase, "encode");
+    assert(!JSON.stringify(error).includes("private"));
+    return true;
+  });
+  assert.equal(prepared, 1);
+  assert.equal(queries.getAuthor(database, { id: 1n })?.name, "a");
+  assert.equal(queries.getAuthor(database, { id: 2n })?.name, "b");
+  assert.equal(prepared, 2);
+  for (let size = 0; size < 20; size++) {
+    const found = queries.findAuthors(database, {
+      ids: Array.from({ length: size }, (_, i) => BigInt(i + 1)),
+    });
+    assert.equal(found.length, Math.min(size, 2));
+    assert(prepared - disposed <= 2);
+  }
+  clearStatementCache(database);
+  assert.equal(prepared, disposed);
 });

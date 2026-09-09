@@ -201,6 +201,17 @@
 (data (i32.const 3121408) "%s(%s, \22decode\22, () => %s, %s)")
 (func $drv_convert_compact (result i32 i32) (i32.const 3121408) (i32.const 30))
 
+(data (i32.const 3121664) "readRowsAffected")
+(func $drv_read_rows_affected (result i32 i32) (i32.const 3121664) (i32.const 16))
+(data (i32.const 3121920) "readLastInsertId")
+(func $drv_read_last_insert_id (result i32 i32) (i32.const 3121920) (i32.const 16))
+(data (i32.const 3122176) "readLastInsertNumber")
+(func $drv_read_last_insert_number (result i32 i32) (i32.const 3122176) (i32.const 20))
+(data (i32.const 3122432) "readExecResult")
+(func $drv_read_exec_result (result i32 i32) (i32.const 3122432) (i32.const 14))
+(data (i32.const 3122688) "%s, %s, %s)")
+(func $drv_result_reader_call (result i32 i32) (i32.const 3122688) (i32.const 11))
+
 ;; Contexts contain source metadata only. Quoting and type formatting complete
 ;; before fmt4 starts, so nested helper use cannot overwrite a live argument.
 (func $driver_context (param $query i32) (param $name i32) (param $name_n i32)
@@ -397,19 +408,29 @@
 (func $driver_sqlite (param $m i32) (param $plan i32) (param $bindings i32) (param $bindings_n i32)
   (param $sql i32) (param $sql_n i32) (param $deno i32)
   (local $cmd i32) (local $tuple i32) (local $tuple_n i32) (local $value i32) (local $value_n i32)
-  (local $count i32) (local $i i32)
+  (local $count i32) (local $i i32) (local $reader i32) (local $reader_n i32)
   (local.set $cmd (i32.load offset=12 (local.get $plan)))
   (if (global.get $compact_active)
     (then
-      (call $line (call $concat (call $drv_return_prefix)
-        (call $concat (call $driver_shared_start (local.get $m) (call $drv_run_query)
-          (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (call $drv_callback))))
-      (call $indent))
-    (else
+      (call $runtime_import (local.get $m)
+        (if (result i32 i32) (i32.eq (local.get $cmd) (i32.const 4))
+          (then (call $drv_read_rows_affected))
+          (else (if (result i32 i32) (i32.eq (local.get $cmd) (i32.const 5))
+            (then (if (result i32 i32) (i32.and (local.get $deno) (i32.eqz (global.get $opt_mode_native)))
+              (then (call $drv_read_last_insert_number)) (else (call $drv_read_last_insert_id))))
+            (else (call $drv_read_exec_result))))) (i32.const 0))
+      (local.set $reader_n) (local.set $reader)
+      (call $line (call $fmt1 (call $drv_return_value)
+        (call $fmt3 (call $drv_result_reader_call)
+          (call $driver_shared_start (local.get $m) (call $drv_run_query)
+            (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n))
+          (local.get $reader) (local.get $reader_n)
+          (call $get_text (local.get $m) (i32.const 40)))))
+      (return)))
   (if (local.get $deno)
     (then (call $line (call $fmt1 (call $drv_prepare) (local.get $sql) (local.get $sql_n)))
       (call $line (call $drv_try)) (call $indent) (call $line (call $drv_safe)))
-    (else (call $line (call $fmt1 (call $drv_prepare_safe) (local.get $sql) (local.get $sql_n)))))))
+    (else (call $line (call $fmt1 (call $drv_prepare_safe) (local.get $sql) (local.get $sql_n)))))
   (block $query_done
     (if (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1)) (then
       (call $runtime_import (local.get $m) (call $drv_sqlite_value) (i32.const 1)) (local.set $value_n) (local.set $value)
@@ -443,8 +464,6 @@
       (call $line (call $fmt2 (call $drv_return_result)
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_rows_affected) (call $drv_bigint) (call $drv_big_changes))
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_last_id) (call $drv_bigint) (call $drv_big_last)))))))
-  (if (global.get $compact_active) (then
-    (call $dedent) (call $line (call $drv_map_end)) (return)))
   (if (local.get $deno) (then
     (call $dedent) (call $line (call $drv_finally)) (call $indent) (call $line (call $drv_dispose)) (call $dedent) (call $line (call $drv_end)))))
 

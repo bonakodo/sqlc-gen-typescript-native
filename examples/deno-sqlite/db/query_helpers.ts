@@ -4,46 +4,45 @@ import type { QueryContext as _QueryContext } from "./runtime_common.ts";
 import type { SqliteValue as _SqliteValue } from "./runtime_sqlite.ts";
 import { decodeValue as _decodeValue, encodeValue as _encodeValue } from "./runtime_sqlite.ts";
 
-export interface Args0 {
+export interface Args3gWIBC {
   id: bigint;
   name: string;
   bio: string | null;
 }
 
-export function bind0(args: Args0, _q: _QueryContext) {
+export function bind3gWIBC(args: Args3gWIBC, _q: _QueryContext) {
   return [
-    _encodeValue("integer", args.id, false, _q, f1),
-    _encodeValue("string", args.name, false, _q, f2),
-    _encodeValue("string", args.bio, true, _q, f3),
+    _encodeValue("integer", args.id, false, _q, f3mWPHP),
+    _encodeValue("string", args.name, false, _q, f2dYbid),
+    _encodeValue("string", args.bio, true, _q, f2VIB2p),
   ] as const;
 }
 
-export interface Row1 {
+export interface Row3gWIBC {
   id: bigint;
   name: string;
   bio: string | null;
 }
 
-export function read1(row: [_SqliteValue, _SqliteValue, _SqliteValue], _q: _QueryContext): Row1 {
+export function read3gWIBC(row: [_SqliteValue, _SqliteValue, _SqliteValue], _q: _QueryContext): Row3gWIBC {
   if (row.length !== 3) throw new Error("SQL result column count does not match the generated query");
   return {
-    id: _decodeValue<bigint>("integer", row[0], false, false, _q, f1),
-    name: _decodeValue<string>("string", row[1], false, false, _q, f2),
-    bio: _decodeValue<string | null>("string", row[2], true, false, _q, f3),
+    id: _decodeValue<bigint>("integer", row[0], false, false, _q, f3mWPHP),
+    name: _decodeValue<string>("string", row[1], false, false, _q, f2dYbid),
+    bio: _decodeValue<string | null>("string", row[2], true, false, _q, f2VIB2p),
   };
 }
 
-export interface Args2 {
+export interface ArgsZNu5z {
   id: bigint;
 }
 
-export function bind2(args: Args2, _q: _QueryContext) {
+export function bindZNu5z(args: ArgsZNu5z, _q: _QueryContext) {
   return [
-    _encodeValue("integer", args.id, false, _q, f1),
+    _encodeValue("integer", args.id, false, _q, f3mWPHP),
   ] as const;
 }
 
-export const f0 = ["rowsAffected", "bigint"] as const;
-export const f1 = ["id", "bigint"] as const;
-export const f2 = ["name", "string"] as const;
-export const f3 = ["bio", "string | null"] as const;
+export const f3mWPHP = ["id", "bigint"] as const;
+export const f2dYbid = ["name", "string"] as const;
+export const f2VIB2p = ["bio", "string | null"] as const;

@@ -99,7 +99,15 @@ export const textCodec = {
           options: { runtime: "deno", driver, query_overrides },
         })),
       }]);
-      await compareBuilds(directory);
+      const generated = await compareBuilds(directory);
+      const source = generated["query_sql.ts"]!;
+      const sequential = source.match(
+        /export (?:async )?function sequential\([\s\S]*?\n\}/,
+      )?.[0];
+      assert(sequential, "generated sequential query");
+      // Fixed bindings should encode at the helper call without a single-use
+      // local array alias. Behavior below checks getter and codec order.
+      assert(!/const _sqlcBindings =/.test(sequential));
       modules.push(join(directory, "wasm/index.ts"));
       const queries = await import(
         pathToFileURL(join(directory, "wasm/query_sql.ts")).href
@@ -239,7 +247,13 @@ export const textCodec = {
         "encoding must finish before preparing SQL",
       );
       assert.equal(executions.length, beforeExecute);
-      if (driver === "@bonakodo/sqlite") assert.equal(disposed, prepared);
+      if (driver === "@bonakodo/sqlite") {
+        const { clearStatementCache } = await import(
+          pathToFileURL(join(directory, "wasm/runtime_sqlite.ts")).href
+        );
+        clearStatementCache(database);
+        assert.equal(disposed, prepared);
+      }
       if (driver === "better-sqlite3") assert.equal(disposed, 0);
     });
   }

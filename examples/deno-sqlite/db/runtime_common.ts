@@ -3,9 +3,6 @@
 import type { CodecContext } from "./codec_error.ts";
 export type { CodecContext };
 
-import { withCodecContext } from "./codec_error.ts";
-export { withCodecContext };
-
 import { throwCodecError } from "./codec_error.ts";
 export { throwCodecError };
 

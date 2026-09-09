@@ -176,6 +176,10 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
       };
     },
   };
+  const { configureStatementCache, clearStatementCache } = await import(
+    pathToFileURL(join(directory, "wasm/runtime_sqlite.ts")).href
+  );
+  configureStatementCache(database, 2);
   const args = { value: 1n };
   for (const query of [same.readFirst!, same.readSecond!, other.readOther!]) {
     const result = query(database, args);
@@ -193,6 +197,8 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
     value: true,
     notes: null,
   });
+  assert.equal(disposed, 3, "query files share one connection limit");
+  clearStatementCache(database);
   assert.equal(disposed, 5);
   assert.deepEqual(bindings, Array.from({ length: 5 }, () => [1n]));
   assert.deepEqual(codecA.readCodecA!(database, args), {
@@ -203,6 +209,7 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
     value: "b:1",
     notes: null,
   });
+  clearStatementCache(database);
   assert.throws(
     () => same.readFirst!(database, { value: "private-invalid-value" }),
     codecError("ReadFirst", "same.sql", "value", "bigint", "encode"),
@@ -239,6 +246,7 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
   row = undefined;
   assert.equal(same.readFirst!(database, args), null);
   assert.deepEqual(same.readMany!(database, args), []);
+  clearStatementCache(database);
 });
 
 Deno.test("shared server decoders keep async calls and omit unused engine features", async (t) => {

@@ -146,6 +146,7 @@
   "compact_row_fn": "read",
   "compact_args_fn": "bind",
   "compact_field": "f",
+  "compact_hash_digits": "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$",
   "compact_query_type": "QueryContext",
   "compact_field_type": "FieldContext",
   "compact_interface": "export interface %s extends %s {}",

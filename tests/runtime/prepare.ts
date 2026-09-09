@@ -28,7 +28,13 @@ function request(engine: string, driver: string): Buffer {
   const schema = engine === "sqlite" ? "main" : "public";
   const queries: Buffer[] = [];
   const queryOverrides: Record<string, unknown>[] = [];
-  function echo(name: string, type: string, array = false, slice = false) {
+  function echo(
+    name: string,
+    type: string,
+    array = false,
+    slice = false,
+    command = ":one",
+  ) {
     const column = Buffer.concat([
       field(1, "value"),
       integerField(3, 1),
@@ -45,7 +51,7 @@ function request(engine: string, driver: string): Buffer {
     queries.push(Buffer.concat([
       field(1, `SELECT ${parameter} AS value`),
       field(2, name),
-      field(3, ":one"),
+      field(3, command),
       field(4, column),
       field(5, Buffer.concat([integerField(1, 1), field(2, column)])),
       field(7, "query.sql"),
@@ -72,6 +78,7 @@ function request(engine: string, driver: string): Buffer {
     if (engine === "postgresql") echo(`Array${index}`, type, true);
   }
   if (engine === "sqlite") {
+    echo("Many", "INTEGER", false, false, ":many");
     for (
       const [index, preset] of [
         "safe_integer",

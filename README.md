@@ -135,9 +135,10 @@ emitting JavaScript. See the checked configuration in
 `tests/integration/tsconfig.json`. The test and example import maps resolve
 `@bonakodo/sqlite` to the published `jsr:@bonakodo/sqlite@0.1.0` package.
 Generated code uses the bare package name so applications can supply their own
-import map. Queries use `safeIntegers()`, `raw().get()`/`all()`, `run()` result
-fields, and `Symbol.dispose` to release statements on success or failure. They
-leave connection settings unchanged; JSON stays text or bytes without driver
+import map. The SQLite runtime configures `safeIntegers()` and `raw()` per
+statement, then calls `get()`, `all()`, or `run()`. For `@bonakodo/sqlite`, it
+uses `Symbol.dispose` on eviction, errors, clearing, and uncached completion.
+Connection settings stay unchanged; JSON stays text or bytes without driver
 parsing.
 
 Set `DENO_SQLITE_PATH` to an absolute SQLite shared library path before running
@@ -165,7 +166,10 @@ handle; the generated code does not open or close connections.
 - `index.ts` exports models, enums, and query namespaces.
 - `query_helpers.ts` shares argument and row types, parameter encoders, row
   decoders, and field metadata across SQL modules. Query modules keep their
-  public names and interfaces.
+  public names and interfaces. Internal names use a short role and a hash of
+  the field contract, so unrelated queries usually leave them unchanged. Full
+  contract checks govern sharing; rare hash collisions and conflicting imported
+  type names can still rename their collision group.
 - `runtime_common.ts` contains helpers used across engines. A second file,
   `runtime_sqlite.ts`, `runtime_postgresql.ts`, or `runtime_mysql.ts`, contains
   the selected engine's conversions, query execution helpers, and driver
@@ -196,7 +200,7 @@ older better-sqlite3 generator rejected `:execlastid`; this plugin adds it with
 a `bigint` result. Unsupported annotations produce errors.
 
 The SQLite drivers use positional rows and checked conversions. Deno statements
-are finalized in `finally`; better-sqlite3 owns statement disposal. Integer
+use a bounded statement cache; better-sqlite3 owns statement disposal. Integer
 reads use per-statement settings without changing the connection. MySQL uses its
 promise `execute()` API to bind values safely, including SQL text containing
 `?`. PostgreSQL keeps repeated parameters in one bind slot so server type
@@ -204,6 +208,65 @@ inference stays consistent. Compiler-marked SQLite/MySQL slices expand at
 runtime; empty slices emit `NULL`. PostgreSQL arrays bind as one parameter; use
 `ANY($1)` for array membership. PostgreSQL `sqlc.slice` produces a generation
 error with this guidance instead of emitting a query that fails at runtime.
+
+### Statement reuse
+
+`@bonakodo/sqlite` keeps up to **16 statements per connection**, shared by query
+files through their generated `runtime_sqlite.ts`. Set the limit on each actual
+`Database` instance; use zero for workloads with little SQL reuse:
+
+```ts
+import { configureStatementCache, clearStatementCache } from "./db/runtime_sqlite.ts";
+
+configureStatementCache(database, 16); // 0 disables generator-owned caching
+try {
+  // Use generated queries, including synchronous transaction callbacks.
+} finally {
+  try {
+    clearStatementCache(database);
+  } finally {
+    database.close();
+  }
+}
+```
+
+The cache uses weak connection keys, exact SQL and row mode, and LRU eviction.
+It configures integer and row settings once per prepared statement. Values and
+results never enter cache keys or retained entries; the driver resets statements
+and clears transient bindings before returning. Slices share this same limit,
+so each distinct expanded SQL consumes an entry. The limit counts statements,
+not bytes: long SQL and many placeholders can use more native memory.
+
+Arguments validate before acquisition. Each call owns its statement through
+execution, conversion, and cleanup. Nested calls use separate temporary
+statements when the matching entry is active or every slot is active; they
+finalize at call exit. The cache never waits, grows its retained entry count
+under pressure, or retries failed SQL. Execution, reset, and conversion errors
+discard the statement. Cleanup errors propagate with the existing `finally`
+precedence. Clearing tries all idle statements and throws the first cleanup
+error. A driver-rejected disposal stays tracked for a later clear; active
+statements finalize when their calls finish. Lowering a limit
+keeps active handles until their calls finish, then trims to the new limit.
+
+Clear before connection close or application-controlled changes that invalidate
+statements. Clearing after close is also safe: the driver's `close()` already
+finalizes its native handles. A later query uses the driver's closed-connection
+error; a new `Database` receives its own cache. SQLite's prepare-v2 schema rebuild
+handles ordinary schema changes. There is no automatic replay after a stale
+handle or schema error. Commit and rollback do not clear the cache. The cache
+owns only statements it prepares and never touches caller-owned iterators.
+Separate generated outputs each have their own runtime; reuse one output when
+query modules must share the limit. Workers and processes have separate handles.
+
+Other drivers keep their supported ownership rules: better-sqlite3 exposes no
+explicit statement finalization API, so this generator adds no retained cache.
+MySQL2's `execute()` owns its per-connection LRU; configure `maxPreparedStatements`
+on its connections or pool (zero is **not** a disable setting). `pg` uses unnamed
+queries and postgres.js uses its existing `unsafe()` preparation policy. The
+generator does not name, deallocate, or replay PostgreSQL statements. Pool
+transactions still require a checked-out connection or transaction handle.
+See [driver preparation](docs/driver-preparation.md) and
+[measurements](docs/measurements-2026-09-09.md) for tested limits, versions, and tradeoffs.
 
 Set `emit_query_factory: true` to also bind queries to a connection once:
 

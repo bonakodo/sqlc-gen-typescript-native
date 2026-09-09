@@ -18,7 +18,13 @@ fragments join their engine's runtime during the build. They share query
 execution across generated functions and follow the same declaration pruning
 rules. SQLite helpers keep row decoding and write-result conversion inside
 statement cleanup; each driver retains its own missing-row and return-value
-rules. Helpers do not cache statements or own connections.
+rules. The @bonakodo/sqlite alternative owns a bounded statement cache through
+one runtime-local WeakMap, with configurable capacity and explicit clearing.
+Leases protect active entries through result conversion; temporary handles cover
+nested calls and full active caches. The driver resets and clears transient
+bindings; the runtime disposes on eviction/error/clear. It configures raw rows
+and safe integers only once per prepared handle. Other drivers keep their own
+preparation policies and resource lifecycle. Helpers never own connections.
 
 [assets.ts](../../tools/assets.ts) builds a dependency table from the templates.
 [runtime.wat](../runtime.wat) records imports and conversion kinds as it plans

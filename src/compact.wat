@@ -7,20 +7,16 @@
 (global $compact_module (mut i32) (i32.const 0))
 (global $compact_shapes (mut i32) (i32.const 0))
 (global $compact_shapes_tail (mut i32) (i32.const 0))
-(global $compact_shape_count (mut i32) (i32.const 0))
 (global $compact_fields (mut i32) (i32.const 0))
 (global $compact_fields_tail (mut i32) (i32.const 0))
-(global $compact_field_count (mut i32) (i32.const 0))
 
 (func $compact_init
   (global.set $compact_active (i32.const 1))
   (global.set $compact_in_helper (i32.const 0))
   (global.set $compact_shapes (i32.const 0))
   (global.set $compact_shapes_tail (i32.const 0))
-  (global.set $compact_shape_count (i32.const 0))
   (global.set $compact_fields (i32.const 0))
   (global.set $compact_fields_tail (i32.const 0))
-  (global.set $compact_field_count (i32.const 0))
   (global.set $compact_module (call $module_new (call $c_compact_file)))
   (call $compact_module_names (global.get $compact_module)))
 
@@ -35,6 +31,68 @@
 
 (func $compact_type_module (param $m i32) (result i32)
   (select (global.get $compact_module) (local.get $m) (global.get $compact_active)))
+
+;; FNV-1a labels are stable across query insertion and sorting. Lengths and
+;; list markers distinguish string/field boundaries. Hashes only choose names:
+;; sharing still checks full contracts, and name_take resolves any collision.
+(func $compact_hash_number (param $hash i32) (param $value i32) (result i32)
+  (local $bytes i32)
+  (loop $byte
+    (local.set $hash (i32.mul (i32.xor (local.get $hash) (i32.and (local.get $value) (i32.const 255))) (i32.const 16777619)))
+    (local.set $value (i32.shr_u (local.get $value) (i32.const 8)))
+    (local.set $bytes (i32.add (local.get $bytes) (i32.const 1)))
+    (br_if $byte (i32.lt_u (local.get $bytes) (i32.const 4))))
+  (local.get $hash))
+
+(func $compact_hash_text (param $hash i32) (param $p i32) (param $n i32) (result i32)
+  (local $end i32)
+  (local.set $hash (call $compact_hash_number (local.get $hash) (local.get $n)))
+  (local.set $end (i32.add (local.get $p) (local.get $n)))
+  (block $done (loop $byte
+    (br_if $done (i32.eq (local.get $p) (local.get $end)))
+    (local.set $hash (i32.mul (i32.xor (local.get $hash) (i32.load8_u (local.get $p))) (i32.const 16777619)))
+    (local.set $p (i32.add (local.get $p) (i32.const 1))) (br $byte)))
+  (local.get $hash))
+
+(func $compact_hash_fields (param $hash i32) (param $field i32) (result i32)
+  (local $offset i32)
+  (block $done (loop $fields
+    (br_if $done (i32.eqz (local.get $field)))
+    (local.set $hash (call $compact_hash_number (local.get $hash) (i32.const 1)))
+    (local.set $offset (i32.const 32))
+    (loop $flags
+      (local.set $hash (call $compact_hash_number (local.get $hash) (i32.load (i32.add (local.get $field) (local.get $offset)))))
+      (local.set $offset (i32.add (local.get $offset) (i32.const 4)))
+      (br_if $flags (i32.lt_u (local.get $offset) (i32.const 48))))
+    (local.set $hash (call $compact_hash_text (local.get $hash) (call $get_text (local.get $field) (i32.const 16))))
+    (local.set $hash (call $compact_hash_text (local.get $hash) (call $get_text (local.get $field) (i32.const 24))))
+    (local.set $hash (call $compact_hash_text (local.get $hash) (call $get_text (local.get $field) (i32.const 48))))
+    (local.set $hash (call $compact_hash_text (local.get $hash) (call $get_text (local.get $field) (i32.const 56))))
+    (local.set $hash (call $compact_hash_text (local.get $hash) (call $text (i32.load offset=8 (local.get $field)) (i32.const 5))))
+    (local.set $hash (call $compact_hash_fields (local.get $hash) (i32.load offset=12 (local.get $field))))
+    (local.set $field (call $next (local.get $field))) (br $fields)))
+  (call $compact_hash_number (local.get $hash) (i32.const 0)))
+
+;; Base64 keeps all 32 hash bits in at most 6 identifier characters. Field names
+;; stay in declarations rather than repeating inside every helper reference.
+(func $compact_name (param $prefix i32) (param $prefix_n i32) (param $hash i32) (result i32 i32)
+  (local $start i32) (local $left i32) (local $right i32) (local $digit i32) (local $alphabet i32)
+  (call $c_compact_hash_digits) drop (local.set $alphabet)
+  (local.set $start (call $text_mark))
+  (call $text_append (local.get $prefix) (local.get $prefix_n))
+  (local.set $left (call $text_mark))
+  (loop $digits
+    (call $text_byte (i32.load8_u (i32.add (local.get $alphabet) (i32.and (local.get $hash) (i32.const 63)))))
+    (local.set $hash (i32.shr_u (local.get $hash) (i32.const 6))) (br_if $digits (local.get $hash)))
+  (local.set $right (i32.sub (call $text_mark) (i32.const 1)))
+  (block $done (loop $reverse
+    (br_if $done (i32.ge_u (local.get $left) (local.get $right)))
+    (local.set $digit (i32.load8_u (local.get $left)))
+    (i32.store8 (local.get $left) (i32.load8_u (local.get $right)))
+    (i32.store8 (local.get $right) (local.get $digit))
+    (local.set $left (i32.add (local.get $left) (i32.const 1)))
+    (local.set $right (i32.sub (local.get $right) (i32.const 1))) (br $reverse)))
+  (local.get $start) (i32.sub (call $text_mark) (local.get $start)))
 
 (func $compact_fields_equal (param $a i32) (param $b i32) (result i32)
   (block $done (loop $fields
@@ -59,7 +117,7 @@
 ;; Shape kind109: fields8, argument flag12, type name16, function name24,
 ;; original query32. All referenced field text precedes query scratch marks.
 (func $compact_shape (param $fields i32) (param $args i32) (param $query i32) (result i32)
-  (local $shape i32) (local $scope i32)
+  (local $shape i32) (local $scope i32) (local $hash i32)
   (local.set $shape (global.get $compact_shapes))
   (block $new (loop $find
     (br_if $new (i32.eqz (local.get $shape)))
@@ -72,13 +130,13 @@
   (i32.store offset=12 (local.get $shape) (local.get $args))
   (i32.store offset=32 (local.get $shape) (local.get $query))
   (local.set $scope (i32.load offset=16 (global.get $compact_module)))
+  (local.set $hash (call $compact_hash_fields (i32.const -2128831035) (local.get $fields)))
   (call $set_text (local.get $shape) (i32.const 16) (call $name_take (local.get $scope)
-    (call $concat (if (result i32 i32) (local.get $args) (then (call $c_compact_args_type)) (else (call $c_compact_row_type)))
-      (call $decimal_i32 (global.get $compact_shape_count)))))
+    (call $compact_name (if (result i32 i32) (local.get $args) (then (call $c_compact_args_type)) (else (call $c_compact_row_type)))
+      (local.get $hash))))
   (call $set_text (local.get $shape) (i32.const 24) (call $name_take (local.get $scope)
-    (call $concat (if (result i32 i32) (local.get $args) (then (call $c_compact_args_fn)) (else (call $c_compact_row_fn)))
-      (call $decimal_i32 (global.get $compact_shape_count)))))
-  (global.set $compact_shape_count (i32.add (global.get $compact_shape_count) (i32.const 1)))
+    (call $compact_name (if (result i32 i32) (local.get $args) (then (call $c_compact_args_fn)) (else (call $c_compact_row_fn)))
+      (local.get $hash))))
   (if (global.get $compact_shapes_tail) (then (i32.store offset=4 (global.get $compact_shapes_tail) (local.get $shape)))
     (else (global.set $compact_shapes (local.get $shape))))
   (global.set $compact_shapes_tail (local.get $shape))
@@ -126,8 +184,8 @@
   (call $set_text (local.get $field) (i32.const 8) (call $retain_text (local.get $name) (local.get $name_n)))
   (call $set_text (local.get $field) (i32.const 16) (call $retain_text (local.get $type) (local.get $type_n)))
   (call $set_text (local.get $field) (i32.const 24) (call $name_take (i32.load offset=16 (global.get $compact_module))
-    (call $concat (call $c_compact_field) (call $decimal_i32 (global.get $compact_field_count)))))
-  (global.set $compact_field_count (i32.add (global.get $compact_field_count) (i32.const 1)))
+    (call $compact_name (call $c_compact_field)
+      (call $compact_hash_text (call $compact_hash_text (i32.const -2128831035) (local.get $name) (local.get $name_n)) (local.get $type) (local.get $type_n)))))
   (if (global.get $compact_fields_tail) (then (i32.store offset=4 (global.get $compact_fields_tail) (local.get $field)))
     (else (global.set $compact_fields (local.get $field))))
   (global.set $compact_fields_tail (local.get $field))
