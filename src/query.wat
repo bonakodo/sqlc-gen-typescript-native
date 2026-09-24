@@ -21,6 +21,7 @@
   (local $plan i32) (local $cmd i32) (local $base i32) (local $base_n i32) (local $scope i32)
   (local $param i32) (local $next i32) (local $sorted i32) (local $at i32) (local $prev i32)
   (local $number i32) (local $last_number i32) (local $field i32) (local $tail i32) (local $names i32)
+  (if (global.get $opt_lemmascript) (then (call $lemma_validate (local.get $q))))
   (local.set $cmd (call $query_command (local.get $q)))
   (if (i32.and (i32.eq (global.get $gen_engine) (i32.const 2)) (i32.eq (local.get $cmd) (i32.const 5)))
     (then (call $error (call $c_pg_insert_id))))
@@ -180,7 +181,7 @@
 
 (func $emit_query (param $m i32) (param $plan i32)
   (local $q i32) (local $cmd i32) (local $result i32) (local $result_n i32)
-  (local $sync i32) (local $comments i32) (local $start i32)
+  (local $sync i32)
   (local.set $q (i32.load offset=8 (local.get $plan))) (local.set $cmd (i32.load offset=12 (local.get $plan)))
   (if (i32.and (i32.eqz (global.get $opt_types_only)) (i32.or (global.get $opt_sql_const) (i32.eqz (i32.load offset=60 (local.get $plan))))) (then
     (call $line (call $fmt3 (call $c_sql_constant)
@@ -213,12 +214,10 @@
   (local.set $sync (i32.or (i32.eq (global.get $opt_driver) (i32.const 5))
     (i32.and (i32.eq (global.get $opt_driver) (i32.const 4)) (global.get $opt_mode_native))))
   (if (i32.eqz (local.get $sync)) (then (call $fmt1 (call $c_promise) (local.get $result) (local.get $result_n)) (local.set $result_n) (local.set $result)))
-  (local.set $comments (call $child (local.get $q) (i32.const 6)))
-  (if (local.get $comments) (then
-    (local.set $start (call $text_mark)) (call $comment_begin)
-    (loop $comments (call $comment_add (call $text (local.get $comments) (i32.const 1)))
-      (local.set $comments (call $next (local.get $comments))) (br_if $comments (local.get $comments)))
-    (call $comment_end) (call $line (local.get $start) (i32.sub (call $text_mark) (local.get $start)))))
+  (call $lemma_query_comments (local.get $q))
+  (if (global.get $opt_lemmascript) (then
+    (call $line (call $c_lemma_extern))
+    (call $line (call $c_lemma_impure))))
   (call $line (call $fmt5 (call $c_function_line)
     (if (result i32 i32) (local.get $sync) (then (call $c_empty)) (else (call $c_async)))
     (call $get_text (local.get $plan) (i32.const 16)) (call $database_type (local.get $m))
@@ -226,6 +225,9 @@
       (then (call $fmt1 (call $c_args_decl) (call $get_text (local.get $plan) (i32.const 32)))) (else (call $c_empty)))
     (local.get $result) (local.get $result_n)))
   (call $indent)
+  (if (global.get $opt_lemmascript) (then
+    (if (i32.eqz (local.get $sync)) (then (call $line (call $c_lemma_async))))
+    (call $lemma_query_contract (local.get $plan))))
   (if (global.get $compact_active) (then (call $compact_query_context (local.get $m) (local.get $plan))))
   (call $emit_driver_query (local.get $m) (local.get $plan) (call $emit_bindings (local.get $m) (local.get $plan)))
   (call $dedent) (call $line (call $c_close_brace)) (call $line (call $c_empty)))

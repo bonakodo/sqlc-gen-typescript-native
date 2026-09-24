@@ -20,6 +20,7 @@
 (global $opt_optional_args (mut i32) (i32.const 0))
 (global $opt_factory (mut i32) (i32.const 0))
 (global $opt_sql_const (mut i32) (i32.const 1))
+(global $opt_lemmascript (mut i32) (i32.const 0))
 (global $opt_mysql_support (mut i32) (i32.const 0))
 (global $opt_mysql_strings (mut i32) (i32.const 0))
 (global $opt_mysql_insert_unsigned (mut i32) (i32.const -1))
@@ -90,7 +91,7 @@
 ;; Fold only characters that can compare equal to an ASCII struct-field name.
 ;; Go's Unicode simple-fold classes add U+017F to S and U+212A to K.
 (func $opt_keyeq (param $key i32) (param $p i32) (param $n i32) (result i32)
-  (local $kp i32) (local $end i32) (local $j i32) (local $c i32)
+  (local $kp i32) (local $end i32) (local $j i32) (local $c i32) (local $expected i32)
   (local.set $kp (call $json_ptr (local.get $key)))
   (local.set $end (i32.add (local.get $kp) (call $json_len (local.get $key))))
   (block $done
@@ -111,7 +112,10 @@
           (if (i32.and (i32.eq (i32.load8_u (local.get $kp)) (i32.const 132))
                 (i32.eq (i32.load8_u offset=1 (local.get $kp)) (i32.const 170)))
             (then (local.set $c (i32.const 107)) (local.set $kp (i32.add (local.get $kp) (i32.const 2)))))))
-      (if (i32.ne (local.get $c) (i32.load8_u (i32.add (local.get $p) (local.get $j))))
+      (local.set $expected (i32.load8_u (i32.add (local.get $p) (local.get $j))))
+      (if (i32.le_u (i32.sub (local.get $expected) (i32.const 65)) (i32.const 25))
+        (then (local.set $expected (i32.add (local.get $expected) (i32.const 32)))))
+      (if (i32.ne (local.get $c) (local.get $expected))
         (then (return (i32.const 0))))
       (local.set $j (i32.add (local.get $j) (i32.const 1)))
       (br $byte)))
@@ -138,12 +142,12 @@
 (global $opt_shape_ranges i32 (i32.const 2624512))
 (global $opt_shape_fields i32 (i32.const 2624536))
 (data (i32.const 2624512)
-  "\00\00\34\00" ;; Options
-  "\34\00\0c\00" ;; MySQL2Options
-  "\48\00\28\00" ;; Override
-  "\48\00\10\00" ;; TypeMapping
-  "\70\00\24\00" ;; QueryOverride
-  "\40\00\08\00" ;; Import/Codec
+  "\00\00\38\00" ;; Options
+  "\38\00\0c\00" ;; MySQL2Options
+  "\4c\00\28\00" ;; Override
+  "\4c\00\10\00" ;; TypeMapping
+  "\74\00\24\00" ;; QueryOverride
+  "\44\00\08\00" ;; Import/Codec
 )
 (data (i32.const 2624536)
   ;; Options
@@ -160,6 +164,7 @@
   "\7f\00\09\05" ;; overrides, shape 5
   "\88\00\0d\06" ;; type_mappings, shape 6
   "\95\00\0f\07" ;; query_overrides, shape 7
+  "\1c\0b\0f\02" ;; emitLemmaScript, shape 2
   ;; MySQL2Options
   "\a4\00\13\02" ;; support_big_numbers, shape 2
   "\b7\00\12\02" ;; big_number_strings, shape 2
@@ -768,6 +773,7 @@
   (global.set $opt_optional_args (i32.const 0))
   (global.set $opt_factory (i32.const 0))
   (global.set $opt_sql_const (i32.const 1))
+  (global.set $opt_lemmascript (i32.const 0))
   (global.set $opt_mysql_support (i32.const 0))
   (global.set $opt_mysql_strings (i32.const 0))
   (global.set $opt_mysql_insert_unsigned (i32.const -1))
@@ -808,6 +814,7 @@
   (global.set $opt_types_only (call $opt_bool (local.get $obj) (i32.const 2621478) (i32.const 10)))
   (global.set $opt_null_undefined (call $opt_bool (local.get $obj) (i32.const 2621488) (i32.const 22)))
   (global.set $opt_factory (call $opt_bool (local.get $obj) (i32.const 2621532) (i32.const 18)))
+  (global.set $opt_lemmascript (call $opt_bool (local.get $obj) (i32.const 2624284) (i32.const 15)))
   (global.set $opt_optional_args (global.get $opt_null_undefined))
   (local.set $k (call $json_kind (call $opt_get (local.get $obj) (i32.const 2621510) (i32.const 22))))
   (if (i32.or (i32.eq (local.get $k) (i32.const 5)) (i32.eq (local.get $k) (i32.const 6)))
@@ -1157,3 +1164,4 @@
 (data (i32.const 2624222) "\61\66\74\65\72\20\6f\62\6a\65\63\74\20\6b\65\79") ;; 'after object key'
 (data (i32.const 2624238) "\61\66\74\65\72\20\6f\62\6a\65\63\74\20\6b\65\79\3a\76\61\6c\75\65\20\70\61\69\72") ;; 'after object key:value pair'
 (data (i32.const 2624265) "\61\66\74\65\72\20\61\72\72\61\79\20\65\6c\65\6d\65\6e\74") ;; 'after array element'
+(data (i32.const 2624284) "emitLemmaScript")

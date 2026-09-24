@@ -302,6 +302,7 @@ handle supplied by your driver when it differs from the main connection.
 | `emit_null_as_undefined`     | `false`  | Absent rows and nullable results use `undefined`; nullable args may be omitted                              |
 | `optional_nullable_args`     | unset    | Controls nullable argument optionality independently; unset preserves `emit_null_as_undefined` behavior     |
 | `emit_query_factory`         | `false`  | Add connection-bound factories to query modules and the index                                               |
+| `emitLemmaScript`            | `false`  | Emit optional LemmaScript external query contracts and query metadata; does not prove SQL authorization     |
 | `emit_sql_as_const`          | `true`   | Export SQL constants; `false` keeps SQL private                                                             |
 | `mysql2.support_big_numbers` | `false`  | BIGINT values can be `number \| string`                                                                     |
 | `mysql2.big_number_strings`  | `false`  | With `support_big_numbers`, BIGINT values are always `string`                                               |
@@ -541,6 +542,127 @@ default. Server drivers cannot distinguish SQL NULL from JSON null in parsed
 JSON results. A runtime type change otherwise needs a codec, as with schema
 overrides. SQL parsing, missing table functions, and query analysis errors still
 require support in sqlc itself.
+
+### LemmaScript annotations
+
+Set `emitLemmaScript: true` in a codegen block to emit
+[LemmaScript](https://docs.lemmascript.org/spec/) annotations on named query
+functions. The option accepts a boolean and defaults to `false`. Omitting it
+or setting it to `false` preserves the existing output byte for byte. Enabling
+it adds comments; it does not change runtime behavior or add a runtime
+dependency on LemmaScript.
+
+```yaml
+sql:
+  - engine: sqlite
+    schema: schema.sql
+    queries: query.sql
+    codegen:
+      - plugin: typescript
+        out: db
+        options:
+          runtime: deno
+          driver: "@bonakodo/sqlite"
+          sqlite_type_mode: native
+          emitLemmaScript: true
+```
+
+Each query function receives `//@ extern` and `//@ impure`. These declarations
+make the database call a trusted external interface and model each call's
+result independently. Two calls with the same arguments need not return the
+same rows. The generator does not mark a database query `pure` or `verify`.
+See LemmaScript's [cross-file calls](https://docs.lemmascript.org/spec/#29-cross-file-calls)
+and [external declarations](https://docs.lemmascript.org/spec/#211-same-file-extern--extern).
+
+Inside the function, generated `//@ contract` comments describe its engine,
+driver, command, return shape, cardinality, null handling, argument bindings,
+and field conversions. These are plain-language facts for review. LemmaScript
+ignores `contract` text when proving a program; it is not a formal
+postcondition. The comments distinguish query metadata from properties that
+depend on the database, driver, or application codecs.
+
+Add formal preconditions and postconditions to SQL query comments with
+`@lemma`. Write expressions against the generated TypeScript names: arguments
+use `args`, and `\result` denotes the returned value. Each directive occupies
+one SQL comment line:
+
+| SQL comment | Generated annotation | Meaning |
+| ----------- | -------------------- | ------- |
+| `-- @lemma requires EXPR` | `//@ requires EXPR` | A condition callers must establish before the call |
+| `-- @lemma ensures EXPR` | `//@ ensures EXPR` | A guarantee callers may assume on normal return |
+| `-- @lemma contract TEXT` | `//@ contract TEXT` | Additional intent for review; ignored by the prover |
+
+For example, with text columns `documents.id` and `documents.owner_id`:
+
+```sql
+-- name: GetOwnedDocument :one
+-- Return a document only to its owner.
+-- @lemma requires args.actorId.length > 0
+-- @lemma ensures \result === null || \result.ownerId === args.actorId
+-- @lemma contract Ownership must hold for the authenticated actor at query execution.
+SELECT id, owner_id
+FROM documents
+WHERE id = sqlc.arg(id)
+  AND owner_id = sqlc.arg(actor_id);
+```
+
+The query function includes the following annotations in addition to generated
+query metadata and its usual execution code:
+
+```ts
+//@ extern
+//@ impure
+export function getOwnedDocument(
+  database: Database,
+  args: GetOwnedDocumentArgs,
+): GetOwnedDocumentRow | null {
+  //@ requires args.actorId.length > 0
+  //@ ensures \result === null || \result.ownerId === args.actorId
+  //@ contract Ownership must hold for the authenticated actor at query execution.
+  // Generated query execution follows.
+}
+```
+
+**An external postcondition is an assumption, not a proof of the SQL.** Before
+trusting the ownership guarantee above, independently establish that the query
+enforces it and that the caller supplies the authenticated actor's ID. A
+nonempty string does not establish the actor's identity. A caller's proof can
+then use the guarantee, conditional on that external contract being true. The
+plugin does not infer ownership or workspace rules from column names, parse SQL
+into a proof model, prove sqlc correct, or add authorization checks at runtime.
+
+Use `null` or `undefined` in contracts according to
+`emit_null_as_undefined`, and guard optional rows before referring to their
+fields. Match expressions to the selected command: `:one` can return no row,
+`:many` returns an array, and execution commands return their documented
+counts or IDs. Postconditions describe normal returns only. They do not prove
+that a query succeeds, that a failed write leaves no changes, or that access
+still holds after another operation or an `await`. Review write effects,
+transactions, and access revocation separately. Custom codecs and type
+overrides also remain part of the trusted interface.
+
+With the option enabled, the generator rejects unknown `@lemma` directives,
+empty payloads, and embedded control characters or line separators. Ordinary SQL comments remain
+documentation. The plugin does not check whether an expression is a valid or
+true LemmaScript formula; run a compatible LemmaScript verifier as a separate
+build check. The annotation integration targets LemmaScript 0.6.1 with its
+Dafny backend; other versions or backends may differ in their support for
+external impure calls and generated TypeScript types. Extraction confirms that
+this version lifts the emitted preconditions, postconditions, and `impure`
+marker. This is an annotation check, not a completed proof of generated code.
+
+For asynchronous drivers, `\result` retains the external function's
+`Promise<T>` type in LemmaScript 0.6.1; it does not become the resolved row.
+The generator adds an explicit note to those functions and does not invent
+row postconditions. User formulas still pass through unchanged. Proving a
+resolved-row property needs an async-capable model or a separate synchronous
+model. Imported connection types, codecs, and generated type aliases may also
+need explicit models before a backend can check a caller.
+
+`emit_query_factory` factories still forward to the named query functions.
+For proofs, call the named exports directly so the verifier can resolve their
+contracts. `types_only` emits no query functions, so it emits no callable
+LemmaScript contracts.
 
 ### Conversion errors
 

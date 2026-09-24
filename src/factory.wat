@@ -10,6 +10,7 @@
   (call $name_take (local.get $scope) (call $c_create_queries)) (local.set $name_n) (local.set $name)
   (call $name_take (local.get $scope) (call $c_private_database)) (local.set $database_n) (local.set $database)
   (call $name_take (local.get $scope) (call $c_private_args)) (local.set $args_n) (local.set $args)
+  (if (global.get $opt_lemmascript) (then (call $line (call $c_lemma_factory))))
   (call $line (call $fmt3 (call $c_factory_line) (local.get $name) (local.get $name_n) (local.get $database) (local.get $database_n) (call $database_type (local.get $m))))
   (call $indent) (call $line (call $c_return_object)) (call $indent)
   (block $done (loop $plans
@@ -31,6 +32,7 @@
   (local $database i32) (local $database_n i32) (local $group i32)
   (call $name_take (i32.load offset=16 (local.get $m)) (call $c_private_database)) (local.set $database_n) (local.set $database)
   (call $line (call $c_empty))
+  (if (global.get $opt_lemmascript) (then (call $line (call $c_lemma_factory))))
   (call $line (call $fmt2 (call $c_root_factory_line) (local.get $database) (local.get $database_n) (call $database_type (local.get $m))))
   (call $indent) (call $line (call $c_return_object)) (call $indent)
   (local.set $group (global.get $gen_groups))

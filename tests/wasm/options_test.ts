@@ -27,6 +27,7 @@ Deno.test("WAT options", async () => {
     opt_driver_specifier: () => [number, number];
     opt_factory: { value: number };
     opt_get: (a0: number, a1: number, a2: number) => number;
+    opt_lemmascript: { value: number };
     opt_mode_native: { value: number };
     opt_mysql_insert_unsigned: { value: number };
     opt_mysql_strings: { value: number };
@@ -80,6 +81,7 @@ Deno.test("WAT options", async () => {
       "opt_optional_args",
       "opt_factory",
       "opt_sql_const",
+      "opt_lemmascript",
       "opt_mysql_support",
       "opt_mysql_strings",
       "opt_mysql_insert_unsigned",
@@ -173,6 +175,7 @@ Deno.test("WAT options", async () => {
       ),
       opt_factory: Number(Boolean(o.emit_query_factory)),
       opt_sql_const: Number(o.emit_sql_as_const ?? true),
+      opt_lemmascript: Number(Boolean(o.emitLemmaScript)),
       opt_mysql_support: Number(Boolean(o.mysql2?.support_big_numbers)),
       opt_mysql_strings: Number(Boolean(o.mysql2?.big_number_strings)),
       opt_mysql_insert_unsigned: o.mysql2?.insert_id_unsigned == null
@@ -237,6 +240,36 @@ Deno.test("WAT options", async () => {
   );
   for (const v of mismatch.slice(0, 30)) console.log(JSON.stringify(v));
   assert.equal(mismatch.length, 0, "option output/error oracle mismatches");
+
+  for (
+    const [fields, expected] of [
+      ['"emitLemmaScript": true', 1],
+      ['"emitLemmaScript": false', 0],
+      ['"emitLemmaScript": true', 1],
+      ["", 0],
+      ['"emitLemmaScript": null', 0],
+      ['"emitLemmaScript": true, "emitLemmaScript": null', 1],
+      ['"emitLemmaScript": true, "emitLemmaScript": false', 0],
+      ['"EMITLEMMASCRIPT": true', 1],
+      ['"emitlemmaſcript": true', 1],
+      ['"emitLemmaScript": true, "EMITLEMMASCRIPT": false', 0],
+    ] as const
+  ) {
+    parse(`{"driver":"pg"${fields ? `,${fields}` : ""}}`);
+    assert.equal(e.opt_lemmascript.value, expected, fields || "default/reset");
+  }
+  for (const value of ['"true"', "1", "[]", "{}"] as const) {
+    assert.throws(
+      () => parse(`{"driver":"pg","emitLemmaScript":${value}}`),
+      /cannot unmarshal .* into Go struct field Options.emitLemmaScript of type bool/,
+    );
+  }
+  assert.throws(
+    () => parse('{"driver":"pg","emit_lemma_script":true}'),
+    /unknown field "emit_lemma_script"/,
+  );
+  parse('{"driver":"pg"}');
+  assert.equal(e.opt_lemmascript.value, 0, "reset after invalid options");
 
   // JSON tests exercise token views separately from option semantics.
   {

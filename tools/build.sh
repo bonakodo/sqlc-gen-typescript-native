@@ -67,7 +67,7 @@ printf '(module\n' > "$wat_stage/base.wat"
 cat "$wat_repo/src/args-imports.wat" "$wat_repo/src/core.wat" "$wat_stage/assets.wat" >> "$wat_stage/base.wat"
 for wat_fragment in \
   unicode inflection-data text protocol json options overrides typeexpr bindings \
-  types-data types format output state catalog paths module drivers embed query \
+  types-data types format output state catalog paths module drivers embed lemma query \
   factory runtime compact generator entrypoint; do
   printf '\n' >> "$wat_stage/base.wat"
   cat "$wat_repo/src/$wat_fragment.wat" >> "$wat_stage/base.wat"

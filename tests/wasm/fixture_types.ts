@@ -54,6 +54,7 @@ export interface Options {
   optional_nullable_args?: boolean;
   emit_query_factory?: boolean;
   emit_sql_as_const?: boolean;
+  emitLemmaScript?: boolean;
   mysql2?: {
     support_big_numbers?: boolean;
     big_number_strings?: boolean;

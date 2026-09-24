@@ -399,6 +399,92 @@ Deno.test("WAT adversarial", async (t) => {
 
     const plain = request({ queries: [query()] });
     await check("valid/baseline", plain, { status: 0, oracle: true });
+    for (
+      const [i, directive] of [
+        "@lemma ensures true\n//@ assume false",
+        "@lemma ensures true\r//@ assume false",
+        "@lemma contract safe\u2028export const injected = true;",
+        "@lemma contract safe\u2029export const injected = true;",
+        "@lemma requires true\0false",
+        "@lemma requires true\u0001false",
+        "@lemma requires true\u007ffalse",
+        "@lemma requires ",
+        "@lemma ensures   ",
+        "@lemma contract ",
+        "@lemma",
+        "@lemma unknown true",
+      ].entries()
+    ) {
+      await check(
+        `lemma/reject-malformed/${i}`,
+        request({
+          options: { ...defaults, emitLemmaScript: true },
+          queries: [query({ comments: [directive] })],
+        }),
+        { status: 2, diagnostic: /invalid @lemma annotation/ },
+      );
+      const disabled = request({
+        options: { ...defaults, emitLemmaScript: false },
+        queries: [query({ comments: [directive] })],
+      });
+      await check(
+        `lemma/disabled-keeps-existing-comments/${i}`,
+        disabled,
+        {
+          status: 0,
+          same: request({ queries: [query({ comments: [directive] })] }),
+        },
+      );
+    }
+    await check(
+      "lemma/safe-text-cannot-end-line-comment",
+      request({
+        options: { ...defaults, emitLemmaScript: true },
+        queries: [query({
+          comments: [
+            "@lemma contract Keep */ and /* and ` and ${value} as prose.",
+          ],
+        })],
+      }),
+      {
+        status: 0,
+        inspect(files) {
+          const source = files.find((file) => file.name === "queries_sql.ts")
+            ?.contents;
+          assert(source);
+          assert.match(
+            source,
+            /\/\/@ contract Keep \*\/ and \/\* and ` and \$\{value\} as prose\./,
+          );
+        },
+      },
+    );
+    await check(
+      "lemma/metadata-escapes-schema-and-query-text",
+      request({
+        options: { ...defaults, emitLemmaScript: true },
+        queries: [query({
+          name: "Read\n//@ assume false",
+          columns: [column("value\u2028//@ verify")],
+          sql: "SELECT 'template ${value} and ` and */'",
+        })],
+      }),
+      {
+        status: 0,
+        inspect(files) {
+          const source = files.find((file) => file.name === "queries_sql.ts")
+            ?.contents;
+          assert(source);
+          const body = source.slice(source.indexOf("export async function"));
+          assert.doesNotMatch(body, /^[ \t]*\/\/@ (?:assume|verify)\b/m);
+          for (const line of source.split("\n")) {
+            if (line.trimStart().startsWith("//@ contract ")) {
+              assert.doesNotMatch(line, /[\r\u2028\u2029]/);
+            }
+          }
+        },
+      },
+    );
     const nul = "left\0right";
     const strange = [
       nul,
