@@ -8,7 +8,7 @@
     "@types/pg": "8.23.1",
     "better-sqlite3": "13.0.3",
     "bun": "1.4.2",
-    "mysql2": "3.24.3",
+    "mysql2": "3.24.4",
     "pg": "8.23.0",
     "postgres": "3.4.9",
     "typescript": "6.0.3"
