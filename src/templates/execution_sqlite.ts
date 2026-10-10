@@ -1,4 +1,4 @@
-// @part StatementLease @bonakodo
+// @part StatementLease @bun-sqlite
 interface StatementLease {
   statement: ReturnType<Database["prepare"]>;
   cache: StatementCache;
@@ -7,16 +7,16 @@ interface StatementLease {
   discard: boolean;
 }
 
-// @part StatementCache @bonakodo
+// @part StatementCache @node-sqlite @bun-sqlite
 interface StatementCache {
   capacity: number;
   entries: Map<string, StatementLease>;
 }
 
-// @part statementCaches @bonakodo
+// @part statementCaches @node-sqlite @bun-sqlite
 const statementCaches = new WeakMap<Database, StatementCache>();
 
-// @part statementCache @bonakodo
+// @part statementCache @node-sqlite @bun-sqlite
 function statementCache(database: Database): StatementCache {
   let cache = statementCaches.get(database);
   if (cache === undefined) {
@@ -26,7 +26,7 @@ function statementCache(database: Database): StatementCache {
   return cache;
 }
 
-// @part discardStatement @bonakodo
+// @part discardStatement @bun-sqlite
 function discardStatement(lease: StatementLease): void {
   lease.discard = true;
   // Keep ownership if the driver rejects disposal (for example, a clear from
@@ -37,7 +37,7 @@ function discardStatement(lease: StatementLease): void {
   }
 }
 
-// @part trimStatementCache @bonakodo
+// @part trimStatementCache @node-sqlite @bun-sqlite
 function trimStatementCache(cache: StatementCache, limit: number): void {
   if (cache.entries.size <= limit) return;
   let failed = false;
@@ -54,7 +54,7 @@ function trimStatementCache(cache: StatementCache, limit: number): void {
   if (failed) throw failure;
 }
 
-// @part configureStatementCache @bonakodo
+// @part configureStatementCache @node-sqlite @bun-sqlite
 /** Set the retained statement limit for this connection; zero disables reuse. */
 export function configureStatementCache(database: Database, capacity: number): void {
   if (!Number.isSafeInteger(capacity) || capacity < 0) {
@@ -66,8 +66,8 @@ export function configureStatementCache(database: Database, capacity: number): v
   else trimStatementCache(cache, capacity);
 }
 
-// @part clearStatementCache @bonakodo
-/** Finalize idle statements now and active statements when their calls finish. */
+// @part clearStatementCache @node-sqlite @bun-sqlite
+/** Release idle statements now and active statements when their calls finish. */
 export function clearStatementCache(database: Database): void {
   const cache = statementCaches.get(database);
   if (cache === undefined) return;
@@ -75,12 +75,41 @@ export function clearStatementCache(database: Database): void {
   trimStatementCache(cache, 0);
 }
 
-// @part acquireStatement @bonakodo configureStatementCache clearStatementCache
+// @part SqliteStatement @node-sqlite
+// Some Node declarations lag the supported runtime APIs.
+type SqliteStatement = ReturnType<Database["prepare"]> & {
+  setReturnArrays(enabled: boolean): void;
+  close?(): void;
+};
+
+// @part StatementLease @node-sqlite
+interface StatementLease {
+  statement: SqliteStatement;
+  database: Database;
+  cache: StatementCache;
+  key: string | undefined;
+  active: boolean;
+  discard: boolean;
+}
+
+// @part discardStatement @node-sqlite
+function discardStatement(lease: StatementLease): void {
+  lease.discard = true;
+  // Keep ownership if the driver rejects disposal (for example, a clear from
+  // a SQLite callback). A later clear can retry; the marked handle cannot run.
+  // Closing the database already finalizes its statements.
+  if (lease.database.isOpen) lease.statement.close?.();
+  if (lease.key !== undefined && lease.cache.entries.get(lease.key) === lease) {
+    lease.cache.entries.delete(lease.key);
+  }
+}
+
+// @part acquireStatement @node-sqlite configureStatementCache clearStatementCache
 function acquireStatement(database: Database, sql: string, rows: boolean): StatementLease {
   const cache = statementCache(database);
   // Database.close() finalizes handles. Keep its own closed-connection error
   // when the next prepare runs, and drop references to those stale handles.
-  if (database.open === false) clearStatementCache(database);
+  if (database.isOpen === false) clearStatementCache(database);
   const key = cache.capacity === 0 ? undefined : (rows ? "rows:" : "run:") + sql;
   const found = key === undefined ? undefined : cache.entries.get(key);
   if (key !== undefined && found !== undefined && !found.active && !found.discard && cache.capacity > 0) {
@@ -90,29 +119,29 @@ function acquireStatement(database: Database, sql: string, rows: boolean): State
     return found;
   }
   // Same-key recursion cannot replace its active owner. Under pressure, use
-  // a temporary handle and finalize it at call exit; never wait on a lease.
+  // a temporary handle and release it at call exit; never wait on a lease.
   if (found === undefined && cache.capacity > 0) trimStatementCache(cache, cache.capacity - 1);
-  const statement = database.prepare(sql);
+  const statement = database.prepare(sql) as SqliteStatement;
   try {
-    statement.safeIntegers();
-    if (rows) statement.raw();
+    statement.setReadBigInts(true);
+    if (rows) statement.setReturnArrays(true);
   } catch (error) {
-    statement[Symbol.dispose]();
+    statement.close?.();
     throw error;
   }
   const lease: StatementLease = {
-    statement, cache, key, active: true,
+    statement, database, cache, key, active: true,
     discard: found !== undefined || cache.entries.size >= cache.capacity,
   };
   if (key !== undefined && !lease.discard) cache.entries.set(key, lease);
   return lease;
 }
 
-// @part releaseStatement @bonakodo
+// @part releaseStatement @node-sqlite @bun-sqlite
 function releaseStatement(lease: StatementLease, success: boolean): void {
   lease.active = false;
-  // get/all/run already reset and clear transient bindings before returning.
-  // Any reported execution/reset/conversion error discards; never replay SQL.
+  // Completed calls can be reused. Any reported execution/reset/conversion
+  // error discards the statement; never replay SQL.
   if (!success || lease.discard || lease.cache.capacity === 0) {
     discardStatement(lease);
   } else {
@@ -120,7 +149,7 @@ function releaseStatement(lease: StatementLease, success: boolean): void {
   }
 }
 
-// @part queryOne @bonakodo
+// @part queryOne @node-sqlite
 export function queryOne<
   R extends SqliteValue[],
   T,
@@ -138,7 +167,7 @@ export function queryOne<
   let success = false;
   try {
     const stmt = lease.statement;
-    const row = stmt.get(params) as unknown as R | undefined;
+    const row = stmt.get(...params) as unknown as R | undefined;
     const result = row === undefined ? missing : read(row, context);
     success = true;
     return result;
@@ -147,7 +176,7 @@ export function queryOne<
   }
 }
 
-// @part queryMany @bonakodo
+// @part queryMany @node-sqlite
 export function queryMany<R extends SqliteValue[], T, C>(
   database: Database,
   sql: string,
@@ -159,7 +188,7 @@ export function queryMany<R extends SqliteValue[], T, C>(
   let success = false;
   try {
     const stmt = lease.statement;
-    const rows = stmt.all(params) as unknown as R[];
+    const rows = stmt.all(...params) as unknown as R[];
     const result = rows.map((row) => read(row, context));
     success = true;
     return result;
@@ -168,7 +197,7 @@ export function queryMany<R extends SqliteValue[], T, C>(
   }
 }
 
-// @part executeQuery @bonakodo
+// @part executeQuery @node-sqlite @bun-sqlite
 export function executeQuery(
   database: Database,
   sql: string,
@@ -178,14 +207,14 @@ export function executeQuery(
   let success = false;
   try {
     const stmt = lease.statement;
-    stmt.run(params);
+    stmt.run(...params);
     success = true;
   } finally {
     releaseStatement(lease, success);
   }
 }
 
-// @part runQuery @bonakodo
+// @part runQuery @node-sqlite @bun-sqlite
 export function runQuery<T>(
   database: Database,
   sql: string,
@@ -197,7 +226,7 @@ export function runQuery<T>(
   let success = false;
   try {
     const stmt = lease.statement;
-    const result = read(stmt.run(params), context);
+    const result = read(stmt.run(...params), context);
     success = true;
     return result;
   } finally {
@@ -268,9 +297,6 @@ const rowsAffectedField: FieldContext = ["rowsAffected", "bigint"];
 // @part lastInsertIdField
 const lastInsertIdField: FieldContext = ["lastInsertId", "bigint"];
 
-// @part lastInsertNumberField @bonakodo
-const lastInsertNumberField: FieldContext = ["lastInsertId", "number"];
-
 // @part readRowsAffected
 export function readRowsAffected(result: SqliteRunResult, context?: QueryContext): bigint {
   try {
@@ -289,19 +315,105 @@ export function readLastInsertId(result: SqliteRunResult, context?: QueryContext
   }
 }
 
-// @part readLastInsertNumber @bonakodo
-export function readLastInsertNumber(result: SqliteRunResult, context?: QueryContext): number {
-  try {
-    return Number(result.lastInsertRowid);
-  } catch (cause) {
-    throwCodecError(cause, "decode", context, lastInsertNumberField);
-  }
-}
-
 // @part readExecResult
 export function readExecResult(result: SqliteRunResult, context?: QueryContext): ExecResult {
   return {
     rowsAffected: readRowsAffected(result, context),
     lastInsertId: readLastInsertId(result, context),
   };
+}
+
+// @part prepareStatement @bun-sqlite
+function prepareStatement(database: Database, sql: string) {
+  // Bun 1.4.2 exposes this method but omits it from its declarations.
+  const statement = database.prepare(sql) as ReturnType<Database["prepare"]> & {
+    safeIntegers(enabled: boolean): unknown;
+  };
+  try {
+    statement.safeIntegers(true);
+    return statement;
+  } catch (error) {
+    statement.finalize();
+    throw error;
+  }
+}
+
+// @part acquireStatement @bun-sqlite configureStatementCache clearStatementCache
+function acquireStatement(database: Database, sql: string, rows: boolean): StatementLease {
+  const cache = statementCache(database);
+  // Bun has no public isOpen flag. This getter rejects even close(false),
+  // whose prepared handles could otherwise keep executing from our cache.
+  try {
+    void database.inTransaction;
+  } catch (error) {
+    clearStatementCache(database);
+    throw error;
+  }
+  const key = cache.capacity === 0 ? undefined : (rows ? "rows:" : "run:") + sql;
+  const found = key === undefined ? undefined : cache.entries.get(key);
+  if (key !== undefined && found !== undefined && !found.active && !found.discard && cache.capacity > 0) {
+    cache.entries.delete(key);
+    cache.entries.set(key, found);
+    found.active = true;
+    return found;
+  }
+  // Same-key recursion cannot replace its active owner. Under pressure, use
+  // a temporary handle and finalize it at call exit; never wait on a lease.
+  if (found === undefined && cache.capacity > 0) trimStatementCache(cache, cache.capacity - 1);
+  const statement = prepareStatement(database, sql);
+  const lease: StatementLease = {
+    statement, cache, key, active: true,
+    discard: found !== undefined || cache.entries.size >= cache.capacity,
+  };
+  if (key !== undefined && !lease.discard) cache.entries.set(key, lease);
+  return lease;
+}
+
+// @part queryOne @bun-sqlite
+export function queryOne<
+  R extends SqliteValue[],
+  T,
+  C,
+  N extends null | undefined,
+>(
+  database: Database,
+  sql: string,
+  params: readonly SqliteValue[],
+  read: (row: R, context: C) => T,
+  context: C,
+  missing: N,
+): T | N {
+  const lease = acquireStatement(database, sql, true);
+  let success = false;
+  try {
+    const stmt = lease.statement;
+    // values() preserves column order and duplicate column names.
+    const row = stmt.values(...params)[0] as R | undefined;
+    const result = row === undefined ? missing : read(row, context);
+    success = true;
+    return result;
+  } finally {
+    releaseStatement(lease, success);
+  }
+}
+
+// @part queryMany @bun-sqlite
+export function queryMany<R extends SqliteValue[], T, C>(
+  database: Database,
+  sql: string,
+  params: readonly SqliteValue[],
+  read: (row: R, context: C) => T,
+  context: C,
+): T[] {
+  const lease = acquireStatement(database, sql, true);
+  let success = false;
+  try {
+    const stmt = lease.statement;
+    const rows = stmt.values(...params) as unknown as R[];
+    const result = rows.map((row) => read(row, context));
+    success = true;
+    return result;
+  } finally {
+    releaseStatement(lease, success);
+  }
 }

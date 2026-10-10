@@ -2,10 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import Database from "better-sqlite3";
-import * as queries from "./.generated/native-better-sqlite3/wasm/query_sql.ts";
-import { createQueries } from "./.generated/native-better-sqlite3/wasm/index.ts";
-
-import * as compat from "./.generated/node-better-sqlite3/wasm/query_sql.ts";
+import * as queries from "./.generated/node-better-sqlite3/wasm/query_sql.ts";
+import { createQueries } from "./.generated/node-better-sqlite3/wasm/index.ts";
 
 const schema = readFileSync(
   new URL("../fixtures/sqlite/schema.sql", import.meta.url),
@@ -59,29 +57,6 @@ test("better-sqlite3 executes generated CRUD, bigint, slices and conversions", (
     );
     assert.equal(queries.getAuthor(database, { id: 4n }), null);
     assert.equal(typeof database.prepare("SELECT 1").pluck().get(), "number");
-  } finally {
-    database.close();
-  }
-});
-
-test("better-sqlite3 default wrappers are promises with driver value types", async () => {
-  const database = new Database(":memory:");
-  try {
-    database.exec(schema);
-    const author = { id: 1, name: "Ada", bio: null, score: 2.5 };
-    const pending = compat.createAuthor(database, author);
-    assert.ok(pending instanceof Promise);
-    assert.deepEqual(await pending, author);
-    const record = {
-      id: 1,
-      eventCount: 7,
-      active: true,
-      createdAt: new Date("2026-09-07T01:02:03.456Z"),
-      payload: null,
-      document: null,
-    };
-    assert.deepEqual(await compat.createRecord(database, record), record);
-    assert.equal(await compat.deleteAuthor(database, { id: 1 }), 1n);
   } finally {
     database.close();
   }

@@ -1,5 +1,9 @@
 # Generated execution work
 
+> Historical record: Deno output and `@bonakodo/sqlite` support have since
+> been removed. The driver-specific benchmark tool and tests shown here no
+> longer ship. See the [README](../README.md) for current support.
+
 Baseline: clean commit `c26dd3b` (2026-09-09). Historical app figures in the
 request are not a current measurement.
 

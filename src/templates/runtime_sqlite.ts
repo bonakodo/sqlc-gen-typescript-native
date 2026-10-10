@@ -497,18 +497,19 @@ export function decodeCustom<T>(
   }
 }
 
-// @part lastInsertId @bonakodo
+// @part lastInsertId @node-sqlite
 export function lastInsertId(database: Database): bigint {
-  const statement = database.prepare("SELECT last_insert_rowid()");
+  const statement = database.prepare("SELECT last_insert_rowid()") as SqliteStatement;
   try {
-    statement.safeIntegers();
-    const row = statement.raw().get();
+    statement.setReadBigInts(true);
+    statement.setReturnArrays(true);
+    const row = statement.get() as unknown as [SqliteValue] | undefined;
     if (row === undefined) {
       throw new Error("SQLite did not return last_insert_rowid()");
     }
     return integer(row[0]);
   } finally {
-    statement[Symbol.dispose]();
+    if (database.isOpen) statement.close?.();
   }
 }
 
@@ -524,3 +525,17 @@ export function lastInsertId(database: Database): bigint {
 
 
 // @part externalCodecs safeInteger epochMilliseconds sqliteBoolean jsonText
+
+// @part lastInsertId @bun-sqlite
+export function lastInsertId(database: Database): bigint {
+  const statement = prepareStatement(database, "SELECT last_insert_rowid()");
+  try {
+    const row = statement.values()[0] as [SqliteValue] | undefined;
+    if (row === undefined) {
+      throw new Error("SQLite did not return last_insert_rowid()");
+    }
+    return integer(row[0]);
+  } finally {
+    statement.finalize();
+  }
+}

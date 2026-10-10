@@ -64,31 +64,6 @@
     (call $prefix_list (call $tl_native_text_prefix) (local.get $p) (local.get $n)))
     (then (return (i32.const 7) (call $t_string))))
   (i32.const 8) (call $t_unknown))
-(func $sqlite_driver_type (param $column i32) (result i32 i32 i32)
-  (local $p i32) (local $n i32) (local $deno i32)
-  (call $database_name (local.get $column) (i32.const 1) (i32.const 1)) local.set $n local.set $p
-  (local.set $deno (i32.eq (global.get $opt_driver) (i32.const 5)))
-  (if (call $word_list (call $tl_sqlite_int) (local.get $p) (local.get $n))
-    (then
-      (if (local.get $deno) (then (return (i32.const 15) (call $t_number_bigint))))
-      (return (i32.const 2) (call $t_number))))
-  (if (i32.and (local.get $deno) (call $word_list (call $tl_numeric) (local.get $p) (local.get $n)))
-    (then (return (i32.const 15) (call $t_number_bigint))))
-  (if (call $word_list (call $tl_sqlite_number) (local.get $p) (local.get $n)) (then (return (i32.const 2) (call $t_number))))
-  (if (call $word_list (call $tl_bool) (local.get $p) (local.get $n))
-    (then
-      (if (local.get $deno) (then (return (i32.const 2) (call $t_number))))
-      (return (i32.const 3) (call $t_boolean))))
-  (if (call $word_list (call $tl_date) (local.get $p) (local.get $n))
-    (then
-      (if (local.get $deno) (then (return (i32.const 7) (call $t_string))))
-      (return (i32.const 4) (call $t_date))))
-  (if (call $eq (local.get $p) (local.get $n) (call $t_sql_blob))
-    (then
-      (if (local.get $deno) (then (return (i32.const 5) (call $t_bytes))))
-      (return (i32.const 5) (call $t_buffer))))
-  (if (call $word_list (call $tl_sqlite_text) (local.get $p) (local.get $n)) (then (return (i32.const 7) (call $t_string))))
-  (i32.const 8) (call $t_any))
 (func $postgres_type (param $column i32) (result i32 i32 i32)
   (local $p i32) (local $n i32) (local $pg i32)
   (call $database_name (local.get $column) (i32.const 0) (i32.const 1)) local.set $n local.set $p
@@ -135,8 +110,7 @@
   (if (local.get $enum) (then (return (i32.const 7) (call $get_text (local.get $enum) (i32.const 24)))))
   (if (i32.eq (global.get $gen_engine) (i32.const 2)) (then (return (call $postgres_type (local.get $column)))))
   (if (i32.eq (global.get $gen_engine) (i32.const 3)) (then (return (call $mysql_type (local.get $column)))))
-  (if (global.get $opt_mode_native) (then (return (call $sqlite_native_type (local.get $column)))))
-  (call $sqlite_driver_type (local.get $column)))
+  (call $sqlite_native_type (local.get $column)))
 
 (func $kind_text (param $kind i32) (result i32 i32)
   (if (i32.eq (local.get $kind) (i32.const 1)) (then (return (call $t_kind_1))))

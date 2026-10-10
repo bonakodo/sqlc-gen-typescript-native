@@ -1,9 +1,12 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
 import { command, errorMessage, type Pair, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT embed", async () => {
+test("WAT embed", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     em_count: { value: number };
@@ -24,7 +27,7 @@ Deno.test("WAT embed", async () => {
     work_record: (a0: number) => number;
   }
   // Frozen reference cases for the narrow SELECT parser and embed nullability.
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-embed-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-embed-"));
   let wasm;
   try {
     const fragments = await Promise.all(
@@ -40,7 +43,7 @@ Deno.test("WAT embed", async () => {
         "bindings",
         "embed",
       ].map((n) =>
-        Deno.readTextFile(new URL(`../../src/${n}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${n}.wat`, import.meta.url), "utf8"),
       ),
     );
     const funcs = [
@@ -85,27 +88,30 @@ Deno.test("WAT embed", async () => {
   (local.set $model (call $next (local.get $model))) (br $model)))
  (i32.const 0))
 `;
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "test.wat"),
       '(module\n(import "test" "error" (func $error (param i32 i32)))\n' +
-        fragments.join("\n") + findModel + "\n" + funcs.map((n) =>
-          `(export "${n}" (func $${n}))`
-        ).join("\n") + "\n" + globals.map((n) =>
-          `(export "${n}" (global $${n}))`
-        ).join("\n") + "\n)",
+        fragments.join("\n") +
+        findModel +
+        "\n" +
+        funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") +
+        "\n" +
+        globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") +
+        "\n)",
     );
-    const result = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+    const result = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(result.status, 0, result.stderr);
-    wasm = await Deno.readFile(join(directory, "test.wasm"));
+    wasm = await readFile(join(directory, "test.wasm"));
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
-  const dec = new TextDecoder(), enc = new TextEncoder();
+  const dec = new TextDecoder(),
+    enc = new TextEncoder();
   const text = (p: number, n: number) =>
     dec.decode(new Uint8Array(e.memory.buffer, p, n));
   const { instance } = await WebAssembly.instantiate(wasm, {
@@ -132,17 +138,15 @@ Deno.test("WAT embed", async () => {
   const word = (p: number, off = 0) => view.getUint32(p + off, true),
     put = (p: number, off: number, v: number) =>
       view.setUint32(p + off, v, true);
-  const slot = (r: number, f: number) => r ? word(r, 32 + f * 12) : 0;
-  const pair = (
-    r: number,
-    f: number,
-  ): Pair => [slot(r, f), r ? word(r, 36 + f * 12) : 0];
+  const slot = (r: number, f: number) => (r ? word(r, 32 + f * 12) : 0);
+  const pair = (r: number, f: number): Pair => [
+    slot(r, f),
+    r ? word(r, 36 + f * 12) : 0,
+  ];
   const rtext = (r: number, off: number) =>
     text(word(r, off), word(r, off + 4));
   const records = JSON.parse(
-    await Deno.readTextFile(
-      new URL("./fixtures/embed.json", import.meta.url),
-    ),
+    await readFile(new URL("./fixtures/embed.json", import.meta.url), "utf8"),
   ).cases;
   let passed = 0;
   const failed = [];
@@ -204,10 +208,9 @@ Deno.test("WAT embed", async () => {
         const req = e.pb_parse(33554432, input.length);
         e.gen_request.value = req;
         e.gen_catalog.value = slot(req, 2);
-        e.gen_engine.value =
-          ({ sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>)[
-            text(...pair(slot(req, 1), 2))
-          ];
+        e.gen_engine.value = (
+          { sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>
+        )[text(...pair(slot(req, 1), 2))];
         e.work_init();
         let schema = slot(e.gen_catalog.value, 4);
         e.gen_models.value = 0;
@@ -227,7 +230,8 @@ Deno.test("WAT embed", async () => {
         }
         let q = slot(req, 3);
         let i = 0;
-        const mark = e.work_cursor.value, tm = e.txt_cursor.value;
+        const mark = e.work_cursor.value,
+          tm = e.txt_cursor.value;
         while (q) {
           const before = text(...pair(q, 1));
           let col = e.embed_columns(q);

@@ -1,9 +1,13 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { sqliteDefaultOptions } from "./test_helpers.ts";
 import { Buffer } from "node:buffer";
 import { command, errorMessage, type Pair, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT overrides", async () => {
+test("WAT overrides", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     gen_catalog: { value: number };
@@ -25,8 +29,8 @@ Deno.test("WAT overrides", async () => {
     work_init: () => void;
   }
   // Handwritten override matchers checked against frozen reference results.
-  // Tests assemble WAT and run it with Deno.
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-overrides-" });
+  // Tests assemble WAT and run it with Node.
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-overrides-"));
   let wasm;
   try {
     const fragments = await Promise.all(
@@ -41,7 +45,7 @@ Deno.test("WAT overrides", async () => {
         "state",
         "overrides",
       ].map((n) =>
-        Deno.readTextFile(new URL(`../../src/${n}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${n}.wat`, import.meta.url), "utf8"),
       ),
     );
     const funcs = [
@@ -61,24 +65,25 @@ Deno.test("WAT overrides", async () => {
       "options_parse",
     ];
     const globals = ["gen_request", "gen_catalog", "gen_options"];
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "test.wat"),
       '(module\n(import "test" "error" (func $error (param i32 i32)))\n' +
-        fragments.join("\n") + "\n" + funcs.map((n) =>
-          `(export "${n}" (func $${n}))`
-        ).join("\n") + "\n" + globals.map((n) =>
-          `(export "${n}" (global $${n}))`
-        ).join("\n") + "\n)",
+        fragments.join("\n") +
+        "\n" +
+        funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") +
+        "\n" +
+        globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") +
+        "\n)",
     );
-    const result = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+    const result = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(result.status, 0, result.stderr);
-    wasm = await Deno.readFile(join(directory, "test.wasm"));
+    wasm = await readFile(join(directory, "test.wasm"));
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   let stderr = "";
@@ -118,13 +123,14 @@ Deno.test("WAT overrides", async () => {
     view = new DataView(e.memory.buffer);
   const slot = (r: number, f: number) =>
     r ? view.getUint32(r + 32 + f * 12, true) : 0;
-  const fieldtext = (
-    r: number,
-    f: number,
-  ): Pair => [slot(r, f), r ? view.getUint32(r + 36 + f * 12, true) : 0];
+  const fieldtext = (r: number, f: number): Pair => [
+    slot(r, f),
+    r ? view.getUint32(r + 36 + f * 12, true) : 0,
+  ];
   const records = JSON.parse(
-    await Deno.readTextFile(
+    await readFile(
       new URL("./fixtures/overrides.json", import.meta.url),
+      "utf8",
     ),
   ).cases;
   let passed = 0;
@@ -135,7 +141,8 @@ Deno.test("WAT overrides", async () => {
     let err, got;
     try {
       if (r.PatternCase) {
-        const p = enc.encode(r.Pattern), v = enc.encode(r.Value);
+        const p = enc.encode(r.Pattern),
+          v = enc.encode(r.Value);
         mem.set(p, 33554432);
         mem.set(v, 34000000);
         got = Boolean(e.ov_pattern(33554432, p.length, 34000000, v.length));
@@ -146,7 +153,13 @@ Deno.test("WAT overrides", async () => {
         const req = e.pb_parse(33554432, input.length);
         e.gen_request.value = req;
         e.gen_catalog.value = slot(req, 2);
-        e.gen_options.value = e.options_parse(...fieldtext(req, 5));
+        const options = enc.encode(
+          JSON.stringify(
+            sqliteDefaultOptions(JSON.parse(text(...fieldtext(req, 5)))),
+          ),
+        );
+        mem.set(options, 35000000);
+        e.gen_options.value = e.options_parse(35000000, options.length);
         e.work_init();
         e.prepare_overrides();
         const q = slot(req, 3),
@@ -211,10 +224,12 @@ Deno.test("WAT overrides", async () => {
   const parts = ["a", "b", "*", "?", "\\*", "\\?", "\\\\", "\n", "😀"];
   const chars = ["a", "b", "*", "?", "\\", "\n", "\r", "\u2028", "😀"];
   for (let i = 0; i < 10000; i++) {
-    let p = "", v = "";
+    let p = "",
+      v = "";
     for (let n = random(10); n--;) p += parts[random(parts.length)];
     for (let n = random(12); n--;) v += chars[random(chars.length)];
-    const pb = enc.encode(p), vb = enc.encode(v);
+    const pb = enc.encode(p),
+      vb = enc.encode(v);
     mem.set(pb, 33554432);
     mem.set(vb, 34000000);
     assert.equal(

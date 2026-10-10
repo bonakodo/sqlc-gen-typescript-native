@@ -1,5 +1,9 @@
 # Generated-code and SQLite measurements, 2026-09-09
 
+> Historical record: Deno output and `@bonakodo/sqlite` support have since
+> been removed. The driver-specific benchmark tool and tests shown here no
+> longer ship. See the [README](../README.md) for current support.
+
 These measurements use the repository's starting commit `c26dd3b` as the
 comparison baseline. That commit already shares execution helpers, passes
 matching bindings directly, and builds conversion-error context on failure. The

@@ -1,5 +1,5 @@
 /bin/
-/tests/integration/node_modules/
+node_modules/
 /tests/integration/.generated/
 __pycache__/
 .DS_Store

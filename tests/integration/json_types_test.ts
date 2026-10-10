@@ -8,7 +8,7 @@ import type { GetRecordRow as CustomRow } from "./.generated/json-custom/wasm/qu
 import type { GetRecordRow as TypesOnlyRow } from "./.generated/json-types-only/wasm/query_sql.ts";
 import type { Document } from "./json_domain.ts";
 
-type IsAny<T> = 0 extends (1 & T) ? true : false;
+type IsAny<T> = 0 extends 1 & T ? true : false;
 type AssertFalse<T extends false> = T;
 
 /** Compilation fails if default server JSON ever becomes any again. */

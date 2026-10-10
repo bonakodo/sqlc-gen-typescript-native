@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 // Intentional output changes have separate reviewed fixtures. Tests never
 // derive expectations from the candidate or edit the historical Go corpus.
 import { Buffer } from "node:buffer";
@@ -50,7 +51,7 @@ function varint(value: number): Buffer {
 const encode = (data: readonly Field[]) =>
   Buffer.concat(
     data.map(([number, bytes]) =>
-      Buffer.concat([varint(number * 8 + 2), varint(bytes.length), bytes])
+      Buffer.concat([varint(number * 8 + 2), varint(bytes.length), bytes]),
     ),
   );
 export function responseFiles(response: Buffer): Map<string, string> {
@@ -85,7 +86,8 @@ interface Token {
 function tokens(source: string): Token[] {
   const result: Token[] = [];
   for (let i = 0; i < source.length;) {
-    const start = i, c = source[i++];
+    const start = i,
+      c = source[i++];
     if (/\s/.test(c)) continue;
     if (c === "'" || c === '"' || c === "`") {
       let ended = false;
@@ -118,8 +120,9 @@ function tokens(source: string): Token[] {
   return result;
 }
 const supportFile = (name: string) =>
-  /^(?:runtime(?:_(?:common|postgresql|mysql|sqlite))?|codec_error|query_helpers)\.ts$/
-    .test(name);
+  /^(?:runtime(?:_(?:common|postgresql|mysql|sqlite))?|codec_error|query_helpers)\.ts$/.test(
+    name,
+  );
 const modulePath = (file: string, path: string) =>
   path.startsWith(".")
     ? posix.normalize(posix.join(posix.dirname(file), path))
@@ -218,9 +221,10 @@ function fieldComments(
     );
   }
   const all = source.allTokens;
-  const at = all.findIndex((token, index) =>
-    (token.text === "interface" || token.text === "type") &&
-    all[index + 1]?.text === name
+  const at = all.findIndex(
+    (token, index) =>
+      (token.text === "interface" || token.text === "type") &&
+      all[index + 1]?.text === name,
   );
   assert.ok(at >= 0, `missing shared interface ${key}`);
   let open = at + 2;
@@ -244,7 +248,8 @@ function fieldComments(
   return result;
 }
 function otherComments(source: Source): string[] {
-  const all = source.allTokens, result: string[] = [];
+  const all = source.allTokens,
+    result: string[] = [];
   for (let i = 0; i < all.length; i++) {
     if (all[i].text === "interface") {
       while (i < all.length && all[i].text !== "{") i++;
@@ -254,8 +259,10 @@ function otherComments(source: Source): string[] {
         if (all[i].text === "}") depth--;
       }
     } else if (
-      all[i].kind === "comment" && !all[i].text.startsWith("// Code generated")
-    ) result.push(all[i].text);
+      all[i].kind === "comment" &&
+      !all[i].text.startsWith("// Code generated")
+    )
+      result.push(all[i].text);
   }
   return result;
 }
@@ -287,8 +294,10 @@ function interfaceBody(
   }
   const declaration = source.declarations.find((decl) => {
     const at = decl[0].text === "export" ? 1 : 0;
-    return (decl[at]?.text === "interface" || decl[at]?.text === "type") &&
-      decl[at + 1]?.text === name;
+    return (
+      (decl[at]?.text === "interface" || decl[at]?.text === "type") &&
+      decl[at + 1]?.text === name
+    );
   });
   assert.ok(declaration, `missing shared interface ${key}`);
   const open = declaration.findIndex((token) => token.text === "{");
@@ -311,40 +320,39 @@ function interfaceBody(
   return body;
 }
 function publicAPI(sources: Map<string, Source>, source: Source): string[][] {
-  return source.declarations.filter((declaration) =>
-    declaration[0].text === "export"
-  ).map((declaration) => {
-    if (declaration[1]?.text === "interface") {
-      const name = declaration[2].text;
-      return [
-        "export",
-        "interface",
-        name,
-        "{",
-        ...interfaceBody(sources, source, name),
-        "}",
-      ];
-    }
-    const functionAt = declaration[1]?.text === "async" ? 2 : 1;
-    if (declaration[functionAt]?.text === "function") {
-      const open = declaration.findIndex((token) => token.text === "{");
-      const closeParen = declaration.findLastIndex((token, index) =>
-        index < open && token.text === ")"
-      );
-      // Factories infer return types from their bodies; compare them in full.
-      if (declaration[closeParen + 1]?.text === ":") {
-        return canonical(source, declaration.slice(0, open));
+  return source.declarations
+    .filter((declaration) => declaration[0].text === "export")
+    .map((declaration) => {
+      if (declaration[1]?.text === "interface") {
+        const name = declaration[2].text;
+        return [
+          "export",
+          "interface",
+          name,
+          "{",
+          ...interfaceBody(sources, source, name),
+          "}",
+        ];
       }
-    }
-    return canonical(source, declaration);
-  });
+      const functionAt = declaration[1]?.text === "async" ? 2 : 1;
+      if (declaration[functionAt]?.text === "function") {
+        const open = declaration.findIndex((token) => token.text === "{");
+        const closeParen = declaration.findLastIndex(
+          (token, index) => index < open && token.text === ")",
+        );
+        // Factories infer return types from their bodies; compare them in full.
+        if (declaration[closeParen + 1]?.text === ":") {
+          return canonical(source, declaration.slice(0, open));
+        }
+      }
+      return canonical(source, declaration);
+    });
 }
 function importsValid(before: Map<string, string>, after: Map<string, string>) {
   const paths = (file: string, text: string) =>
-    [...text.matchAll(/^(?:import|export)[^\n]* from ("(?:\\.|[^"\\])*");$/gm)]
-      .map((
-        match,
-      ) => modulePath(file, JSON.parse(match[1])));
+    [
+      ...text.matchAll(/^(?:import|export)[^\n]* from ("(?:\\.|[^"\\])*");$/gm),
+    ].map((match) => modulePath(file, JSON.parse(match[1])));
   const external = new Set<string>();
   for (const [file, text] of before) {
     for (const path of paths(file, text)) {
@@ -364,21 +372,22 @@ function importsValid(before: Map<string, string>, after: Map<string, string>) {
 // Exact snapshots still check every byte. This independent comparison prevents
 // reviewed output changes from also changing the existing public API or SQL.
 export function assertPreservedOutput(beforeBytes: Buffer, afterBytes: Buffer) {
-  const before = responseFiles(beforeBytes), after = responseFiles(afterBytes);
+  const before = responseFiles(beforeBytes),
+    after = responseFiles(afterBytes);
   assert.deepEqual(
     [...after.keys()].filter((name) => !supportFile(name)),
     [...before.keys()].filter((name) => !supportFile(name)),
     "public output files/order changed",
   );
   const oldSources = new Map(
-    [...before].filter(([name]) => !supportFile(name)).map((
-      [name, text],
-    ) => [name, parse(name, text)]),
+    [...before]
+      .filter(([name]) => !supportFile(name))
+      .map(([name, text]) => [name, parse(name, text)]),
   );
   const newSources = new Map(
-    [...after].filter(([name]) =>
-      !/^runtime(?:_|\.)|^codec_error\.ts$/.test(name)
-    ).map(([name, text]) => [name, parse(name, text)]),
+    [...after]
+      .filter(([name]) => !/^runtime(?:_|\.)|^codec_error\.ts$/.test(name))
+      .map(([name, text]) => [name, parse(name, text)]),
   );
   for (const [name, old] of oldSources) {
     const current = newSources.get(name)!;
@@ -388,9 +397,12 @@ export function assertPreservedOutput(beforeBytes: Buffer, afterBytes: Buffer) {
       `${name}: public declarations changed`,
     );
     const sql = (source: Source) =>
-      source.tokens.filter((token) =>
-        token.kind === "template" && token.text.includes("-- name:")
-      ).map((token) => token.text);
+      source.tokens
+        .filter(
+          (token) =>
+            token.kind === "template" && token.text.includes("-- name:"),
+        )
+        .map((token) => token.text);
     assert.deepEqual(sql(current), sql(old), `${name}: SQL text changed`);
     assert.deepEqual(
       otherComments(current),
@@ -401,7 +413,8 @@ export function assertPreservedOutput(beforeBytes: Buffer, afterBytes: Buffer) {
       if (
         declaration[0]?.text !== "export" ||
         declaration[1]?.text !== "interface"
-      ) continue;
+      )
+        continue;
       const type = declaration[2].text;
       assert.deepEqual(
         fieldComments(newSources, current, type),
@@ -425,14 +438,14 @@ export interface OutputCorpus {
 export async function createRuntimeMigration() {
   const corpus: OutputCorpus = JSON.parse(
     gunzipSync(
-      await Deno.readFile(
+      await readFile(
         new URL("./fixtures/compact-output.json.gz", import.meta.url),
       ),
     ).toString(),
   );
   assert.equal(corpus.format, 1, "unsupported compact output fixture format");
   const blobs = corpus.response_blobs.map((text) =>
-    Buffer.from(text, "base64")
+    Buffer.from(text, "base64"),
   );
   const expected = new Map<string, Buffer>();
   for (const change of corpus.changes) {
@@ -441,13 +454,15 @@ export async function createRuntimeMigration() {
       !expected.has(change.before_sha256),
       "duplicate compact output fixture",
     );
-    const response = Buffer.concat(change.response_chunks.map((index) => {
-      assert.ok(
-        Number.isInteger(index) && index >= 0 && index < blobs.length,
-        "invalid compact output chunk",
-      );
-      return blobs[index];
-    }));
+    const response = Buffer.concat(
+      change.response_chunks.map((index) => {
+        assert.ok(
+          Number.isInteger(index) && index >= 0 && index < blobs.length,
+          "invalid compact output chunk",
+        );
+        return blobs[index];
+      }),
+    );
     assert.equal(
       hash(response),
       change.after_sha256,
@@ -460,7 +475,8 @@ export async function createRuntimeMigration() {
   return {
     migrate(response: Buffer): Buffer {
       const files = responseFiles(response);
-      const key = hash(response), changed = expected.get(key);
+      const key = hash(response),
+        changed = expected.get(key);
       if (changed) {
         assertPreservedOutput(response, changed);
         covered.add(key);
@@ -486,7 +502,7 @@ export async function createRuntimeMigration() {
         "output retained the old combined runtime",
       );
       const engines = [...files.keys()].filter((name) =>
-        /^runtime_(?:postgresql|mysql|sqlite)\.ts$/.test(name)
+        /^runtime_(?:postgresql|mysql|sqlite)\.ts$/.test(name),
       );
       if (files.has("runtime_common.ts")) {
         assert.equal(
@@ -495,11 +511,7 @@ export async function createRuntimeMigration() {
           "runtime must include exactly one selected engine",
         );
       } else {
-        assert.equal(
-          engines.length,
-          0,
-          "engine runtime has no common runtime",
-        );
+        assert.equal(engines.length, 0, "engine runtime has no common runtime");
       }
       for (const [name, text] of files) {
         if (supportFile(name)) {
@@ -512,4 +524,42 @@ export async function createRuntimeMigration() {
       }
     },
   };
+}
+
+// Inspect valid top-level fields while retaining malformed protocol fixtures.
+export function requestOptions(
+  request: Buffer,
+): Record<string, unknown> | undefined {
+  try {
+    let cursor = 0;
+    const uint = () => {
+      let value = 0;
+      for (let shift = 0; shift < 70; shift += 7) {
+        const byte = request[cursor++];
+        if (byte === undefined) throw new Error("truncated field");
+        value += (byte & 127) * 2 ** shift;
+        if (!(byte & 128)) return value;
+      }
+      throw new Error("invalid integer");
+    };
+    let result;
+    while (cursor < request.length) {
+      const tag = uint();
+      if (tag % 8 === 0) uint();
+      else if (tag % 8 === 1) cursor += 8;
+      else if (tag % 8 === 5) cursor += 4;
+      else if (tag % 8 === 2) {
+        const length = uint(),
+          end = cursor + length;
+        if (end > request.length) return undefined;
+        if (Math.floor(tag / 8) === 5) {
+          result = JSON.parse(request.subarray(cursor, end).toString());
+        }
+        cursor = end;
+      } else return undefined;
+    }
+    return result;
+  } catch {
+    return undefined;
+  }
 }

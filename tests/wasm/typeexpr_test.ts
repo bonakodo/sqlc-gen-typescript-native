@@ -1,9 +1,12 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
 import { command, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT typeexpr", async () => {
+test("WAT typeexpr", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     cursor: { value: number };
@@ -21,31 +24,31 @@ Deno.test("WAT typeexpr", async () => {
   // Compare the typeexpr implementation with the frozen reference corpus.
   const corpusPath = new URL("./fixtures/typeexpr.json", import.meta.url);
 
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-typeexpr-wat-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-typeexpr-wat-"));
   let module: WebAssembly.Module;
   try {
     const fragments = await Promise.all(
       ["core", "unicode", "inflection-data", "text", "typeexpr"].map((name) =>
-        Deno.readTextFile(new URL(`../../src/${name}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${name}.wat`, import.meta.url), "utf8"),
       ),
     );
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "test.wat"),
-      `(module\n${
-        fragments.join("\n")
-      }\n(export "parse" (func $parse_type))(export "error_p" (global $type_error_p))(export "error_n" (global $type_error_n))(export "cursor" (global $txt_cursor)))`,
+      `(module\n${fragments.join(
+        "\n",
+      )}\n(export "parse" (func $parse_type))(export "error_p" (global $type_error_p))(export "error_n" (global $type_error_n))(export "cursor" (global $txt_cursor)))`,
     );
-    const result = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+    const result = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(result.status, 0, result.stderr);
     module = await WebAssembly.compile(
-      await Deno.readFile(join(directory, "test.wasm")),
+      await readFile(join(directory, "test.wasm")),
     );
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   const instance: WebAssembly.Instance = new WebAssembly.Instance(module, {
@@ -72,7 +75,7 @@ Deno.test("WAT typeexpr", async () => {
   const memory = new Uint8Array(api.memory.buffer);
   const text = (p: number, n: number) =>
     Buffer.from(memory.subarray(p, p + n)).toString("utf8");
-  const records = JSON.parse(await Deno.readTextFile(corpusPath));
+  const records = JSON.parse(await readFile(corpusPath, "utf8"));
   let failures = 0;
   for (const [i, record] of records.entries()) {
     api.cursor.value = 20971520;

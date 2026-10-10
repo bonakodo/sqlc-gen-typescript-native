@@ -1,7 +1,10 @@
+import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import type { GeneratorCorpus } from "./fixture_types.ts";
 import {
   assertPreservedOutput,
   createRuntimeMigration,
+  requestOptions,
 } from "./runtime_migration.ts";
 interface Expected {
   status: number;
@@ -9,22 +12,27 @@ interface Expected {
   stderr: Buffer;
 }
 import { Buffer } from "node:buffer";
-import { command, wabt } from "./test_helpers.ts";
+import {
+  command,
+  migrateDriverDiagnostic,
+  removedTarget,
+  wabt,
+} from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { type IOOptions, runPlugin } from "./wasi_test_host.ts";
 
-Deno.test("WAT generator", async (t) => {
+test("WAT generator", async (t) => {
   // Whole-program compatibility checks against frozen reference responses. The test host
   // uses JavaScript allocations; the guest must retain its one fixed memory and
   // import only command arguments and byte-stream I/O.
   //
-  // Usage: deno test -A tests/wasm/generator_test.ts -- [path/to/candidate.wasm]
+  // Usage: WASM_BINARY=path/to/candidate.wasm node --test tests/wasm/generator_test.ts
 
-  const binaryPath = Deno.args[0] ||
-    "bin/sqlc-gen-typescript-native.wasm";
-  const binary = await Deno.readFile(binaryPath);
+  const binaryPath =
+    process.env.WASM_BINARY || "bin/sqlc-gen-typescript-native.wasm";
+  const binary = await readFile(binaryPath);
   const module = await WebAssembly.compile(binary);
   const MEMORY_BYTES = 64 * 1024 * 1024;
   const INPUT_BYTES = 16 * 1024 * 1024;
@@ -32,20 +40,18 @@ Deno.test("WAT generator", async (t) => {
     createHash("sha256").update(bytes).digest("hex");
 
   assert.deepEqual(
-    WebAssembly.Module.imports(module).map((i) =>
-      `${i.module}.${i.name}:${i.kind}`
-    ).sort(),
-    [
-      "args_get",
-      "args_sizes_get",
-      "fd_read",
-      "fd_write",
-      "proc_exit",
-    ].map((name) => `wasi_snapshot_preview1.${name}:function`).sort(),
+    WebAssembly.Module.imports(module)
+      .map((i) => `${i.module}.${i.name}:${i.kind}`)
+      .sort(),
+    ["args_get", "args_sizes_get", "fd_read", "fd_write", "proc_exit"]
+      .map((name) => `wasi_snapshot_preview1.${name}:function`)
+      .sort(),
     "unexpected guest imports",
   );
   assert.deepEqual(
-    WebAssembly.Module.exports(module).map((e) => `${e.name}:${e.kind}`).sort(),
+    WebAssembly.Module.exports(module)
+      .map((e) => `${e.name}:${e.kind}`)
+      .sort(),
     ["_start:function", "memory:memory"],
     "unexpected guest exports",
   );
@@ -54,7 +60,8 @@ Deno.test("WAT generator", async (t) => {
   // or an instruction operand. Equal minimum/maximum also limits host growth.
   let offset = 8;
   function uleb() {
-    let value = 0, shift = 0;
+    let value = 0,
+      shift = 0;
     for (;;) {
       assert.ok(offset < binary.length, "truncated WebAssembly integer");
       const byte = binary[offset++];
@@ -66,7 +73,9 @@ Deno.test("WAT generator", async (t) => {
   }
   let memorySections = 0;
   while (offset < binary.length) {
-    const section = binary[offset++], size = uleb(), end = offset + size;
+    const section = binary[offset++],
+      size = uleb(),
+      end = offset + size;
     assert.ok(end <= binary.length, "truncated WebAssembly section");
     if (section === 5) {
       memorySections++;
@@ -79,9 +88,9 @@ Deno.test("WAT generator", async (t) => {
     offset = end;
   }
   assert.equal(memorySections, 1, "missing guest memory");
-  const printed = await command(wabt("wasm2wat"), [
-    binaryPath,
-  ], { encoding: "utf8" });
+  const printed = await command(wabt("wasm2wat"), [binaryPath], {
+    encoding: "utf8",
+  });
   assert.equal(printed.status, 0, printed.stderr);
   assert.doesNotMatch(
     printed.stdout,
@@ -90,13 +99,24 @@ Deno.test("WAT generator", async (t) => {
   );
 
   const runtimeMigration = await createRuntimeMigration();
+  // Captured from ed8b0d4 with its explicit native option, before its removal.
+  const sqliteDefaults = JSON.parse(
+    gunzipSync(
+      await readFile(
+        new URL("./fixtures/sqlite-default-generator.json.gz", import.meta.url),
+      ),
+    ).toString(),
+  );
+  assert.equal(
+    sqliteDefaults.source_commit,
+    "ed8b0d4783a4f0622909d0ceaaec44a71511ab5c",
+  );
+  const coveredDefaults = new Set<string>();
 
   async function loadCorpus(name: string) {
     const corpus: GeneratorCorpus = JSON.parse(
       gunzipSync(
-        await Deno.readFile(
-          new URL(`./fixtures/${name}.json.gz`, import.meta.url),
-        ),
+        await readFile(new URL(`./fixtures/${name}.json.gz`, import.meta.url)),
       ).toString(),
     );
     assert.equal(corpus.format, 1, "unsupported fixture format");
@@ -105,13 +125,15 @@ Deno.test("WAT generator", async (t) => {
     const blobs = corpus.response_blobs.map((b) => Buffer.from(b, "base64"));
     return corpus.cases.map((c) => {
       const request = Buffer.from(c.request, "base64");
-      const response = Buffer.concat(c.response_chunks.map((i: number) => {
-        assert.ok(
-          Number.isInteger(i) && i >= 0 && i < blobs.length,
-          "invalid response chunk",
-        );
-        return blobs[i];
-      }));
+      const response = Buffer.concat(
+        c.response_chunks.map((i: number) => {
+          assert.ok(
+            Number.isInteger(i) && i >= 0 && i < blobs.length,
+            "invalid response chunk",
+          );
+          return blobs[i];
+        }),
+      );
       assert.equal(
         sha256(request),
         c.request_sha256,
@@ -122,19 +144,39 @@ Deno.test("WAT generator", async (t) => {
         c.response_sha256,
         `${c.name}: response fixture hash`,
       );
+      const migrated = runtimeMigration.migrate(response);
+      const nativeKey = `${c.request_sha256}:${JSON.stringify(c.args)}`;
+      const native = sqliteDefaults.cases[nativeKey];
+      if (native) {
+        coveredDefaults.add(nativeKey);
+        for (const key of ["request", "response"]) {
+          assert.equal(
+            sha256(Buffer.from(native[key], "base64")),
+            native[`${key}_sha256`],
+            `${c.name}: SQLite ${key} fixture hash`,
+          );
+        }
+      }
       return {
         ...c,
-        request,
+        status: native?.status ?? c.status,
+        request: native ? Buffer.from(native.request, "base64") : request,
         // Verify historical bytes before loading reviewed compact expectations.
         // The migration independently checks SQL and expanded public types.
-        response: runtimeMigration.migrate(response),
-        stderr: Buffer.from(c.stderr),
+        response: native ? Buffer.from(native.response, "base64") : migrated,
+        stderr: Buffer.from(
+          migrateDriverDiagnostic(native?.stderr ?? c.stderr),
+        ),
       };
     });
   }
   const cases = await loadCorpus("generator");
   const largeCases = await loadCorpus("generator-large");
   runtimeMigration.assertCoverage();
+  assert.deepEqual(
+    [...coveredDefaults].sort(),
+    Object.keys(sqliteDefaults.cases).sort(),
+  );
 
   function sameBytes(actual: Buffer, expected: Buffer, label: string) {
     if (actual.equals(expected)) return;
@@ -142,15 +184,16 @@ Deno.test("WAT generator", async (t) => {
     while (
       first < Math.min(actual.length, expected.length) &&
       actual[first] === expected[first]
-    ) first++;
+    )
+      first++;
     assert.fail(
       `${label}: first difference at byte ${first}; got ${actual.length} bytes, wanted ${expected.length}; ` +
-        `got ${
-          JSON.stringify(actual.subarray(first, first + 120).toString())
-        }, ` +
-        `wanted ${
-          JSON.stringify(expected.subarray(first, first + 120).toString())
-        }`,
+        `got ${JSON.stringify(
+          actual.subarray(first, first + 120).toString(),
+        )}, ` +
+        `wanted ${JSON.stringify(
+          expected.subarray(first, first + 120).toString(),
+        )}`,
     );
   }
   async function check(
@@ -160,7 +203,7 @@ Deno.test("WAT generator", async (t) => {
     expected: Expected,
     io?: IOOptions,
   ) {
-    await t.step(name, async () => {
+    await t.test(name, async () => {
       const actual = await runPlugin(module, request, args, io);
       assert.equal(
         actual.status,
@@ -173,26 +216,35 @@ Deno.test("WAT generator", async (t) => {
     });
   }
   for (const c of [...cases, ...largeCases] as const) {
+    const options = requestOptions(c.request);
+    if (options && removedTarget(options)) continue;
     await check(c.name, c.request, c.args, c);
   }
 
   // Byte-at-a-time reads/writes cover fragmented protobuf headers, payloads,
   // response headers and diagnostics. The large fixture uses bounded short I/O
   // by default, without making millions of JavaScript calls.
-  const success = cases.find((c) => c.name === "method/slash");
+  const success = cases.find(
+    (c) => c.status === 0 && !removedTarget(requestOptions(c.request) ?? {}),
+  );
   assert.ok(success, "missing transport fixture");
-  for (
-    const name of [
-      "method/slash",
-      "method/bare",
-      "method/unknown",
-      "wire/invalid-utf8",
-      "wire/zero-tag",
-    ] as const
-  ) {
-    const c = cases.find((c) => c.name === name);
-    assert.ok(c, `missing fixture ${name}`);
-    for (const [readChunk, writeChunk] of [[1, 1], [37, 29]] as const) {
+  for (const name of [
+    "method/slash",
+    "method/bare",
+    "method/unknown",
+    "wire/invalid-utf8",
+    "wire/zero-tag",
+  ] as const) {
+    const original = cases.find((c) => c.name === name);
+    assert.ok(original, `missing fixture ${name}`);
+    const c =
+      name === "method/slash" || name === "method/bare"
+        ? { ...success, args: original.args }
+        : original;
+    for (const [readChunk, writeChunk] of [
+      [1, 1],
+      [37, 29],
+    ] as const) {
       await check(
         `${name} short I/O ${readChunk}/${writeChunk}`,
         c.request,
@@ -203,7 +255,7 @@ Deno.test("WAT generator", async (t) => {
     }
   }
   const optionError = cases.find((c) =>
-    c.stderr.includes("typescript options: typescript options:")
+    c.stderr.includes("typescript options: typescript options:"),
   );
   assert.ok(optionError, "missing wrapped options diagnostic fixture");
   await check(
@@ -226,8 +278,8 @@ Deno.test("WAT generator", async (t) => {
   // Unknown protobuf bytes are legal padding. The exact 16 MiB request must
   // succeed; the following extra byte must fail before protobuf parsing starts.
   const paddingTag = varint(500 * 8 + 2);
-  const paddingLength = INPUT_BYTES - success.request.length -
-    paddingTag.length - 4;
+  const paddingLength =
+    INPUT_BYTES - success.request.length - paddingTag.length - 4;
   assert.equal(varint(paddingLength).length, 4);
   const fullInput = Buffer.concat([
     success.request,
@@ -270,15 +322,21 @@ Deno.test("WAT generator", async (t) => {
     { stdoutZero: true },
   );
   for (const io of [{ stderrError: true }, { stderrZero: true }] as const) {
-    await check(`failed stderr ${Object.keys(io)[0]}`, Buffer.from([0]), [], {
-      status: 2,
-      response: Buffer.alloc(0),
-      stderr: Buffer.alloc(0),
-    }, io);
+    await check(
+      `failed stderr ${Object.keys(io)[0]}`,
+      Buffer.from([0]),
+      [],
+      {
+        status: 2,
+        response: Buffer.alloc(0),
+        stderr: Buffer.alloc(0),
+      },
+      io,
+    );
   }
 });
 
-Deno.test("output fixture migration rejects unknown responses and retains unchanged files", async () => {
+test("output fixture migration rejects unknown responses and retains unchanged files", async () => {
   const migration = await createRuntimeMigration();
   const field = (key: number, bytes: Uint8Array) => {
     assert.ok(bytes.length < 128);
@@ -306,7 +364,7 @@ Deno.test("output fixture migration rejects unknown responses and retains unchan
   );
 });
 
-Deno.test("output migration audit resolves shared types and catches public regressions", () => {
+test("output migration audit resolves shared types and catches public regressions", () => {
   const uint = (value: number) => {
     const bytes: number[] = [];
     do {
@@ -327,7 +385,7 @@ Deno.test("output migration audit resolves shared types and catches public regre
             field(1, Buffer.from(name)),
             field(2, Buffer.from(source)),
           ]),
-        )
+        ),
       ),
     );
   const sql =
@@ -335,7 +393,8 @@ Deno.test("output migration audit resolves shared types and catches public regre
   const comment = '/** Keep \\"quotes\\" and { braces }. */\n';
   const old = response({
     "nested/query_sql.ts":
-      'import type { Database as _old } from "../runtime.ts";\n' + sql +
+      'import type { Database as _old } from "../runtime.ts";\n' +
+      sql +
       comment +
       'export interface ReadRow { id: number; "a\\"b": string | null; _short: boolean; }\n' +
       "export async function read(database: _old): Promise<ReadRow | null> { return null; }\n",
@@ -344,7 +403,8 @@ Deno.test("output migration audit resolves shared types and catches public regre
   const files = {
     "nested/query_sql.ts":
       'import type { Database as _db } from "../runtime_postgresql.ts";\n' +
-      'import type { Shared as _short } from "../query_helpers.ts";\n' + sql +
+      'import type { Shared as _short } from "../query_helpers.ts";\n' +
+      sql +
       comment +
       "export interface ReadRow extends _short {}\n" +
       "export async function read(database: _db): Promise<ReadRow | null> { return null; }\n",
@@ -404,8 +464,7 @@ Deno.test("output migration audit resolves shared types and catches public regre
           old,
           response({
             ...files,
-            "runtime_postgresql.ts":
-              `${keyword} { common } from "./missing.ts";\nexport interface Database {}\n`,
+            "runtime_postgresql.ts": `${keyword} { common } from "./missing.ts";\nexport interface Database {}\n`,
           }),
         ),
       /missing generated import/,

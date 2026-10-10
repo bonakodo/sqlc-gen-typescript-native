@@ -68,7 +68,7 @@ has different rules. No PgBouncer or other proxy was tested here; see
 
 ## Live checks and measurements
 
-`deno task live` builds and generates fresh fixtures, checks published TypeScript
+`npm run live` builds and generates fresh fixtures, checks published TypeScript
 driver declarations under strict settings, and runs five live suites. Tests use
 server views and status counters rather than private JavaScript driver caches.
 They cover separate physical connections, pool calls, concurrent operations,

@@ -1,9 +1,12 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
 import { command, filenames, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT protocol", async () => {
+test("WAT protocol", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     child: (a0: number, a1: number) => number;
@@ -19,15 +22,15 @@ Deno.test("WAT protocol", async () => {
     text_ptr: (a0: number, a1: number) => number;
   }
   // Independently decode protobuf and compare it with the WAT fixed record table.
-  // Run: deno test -A tests/wasm/protocol_test.ts -- [captured-corpus-directory]
+  // Run: PROTOCOL_CORPUS=path/to/corpus node --test tests/wasm/protocol_test.ts
 
   const base = 33554432;
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-protocol-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-protocol-"));
   let compiled;
   try {
     const fragments = await Promise.all(
       ["core.wat", "protocol.wat"].map((name) =>
-        Deno.readTextFile(new URL(`../../src/${name}`, import.meta.url))
+        readFile(new URL(`../../src/${name}`, import.meta.url), "utf8"),
       ),
     );
     const source = `(module\n${fragments.join("\n")}\n
@@ -49,18 +52,18 @@ Deno.test("WAT protocol", async () => {
       (call $pb_message (local.get $r) (local.get $p) (local.get $n) (i32.const 0))
       (local.get $r))
   )`;
-    await Deno.writeTextFile(join(directory, "test.wat"), source);
-    const result = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+    await writeFile(join(directory, "test.wat"), source);
+    const result = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(result.status, 0, result.stderr);
     compiled = await WebAssembly.compile(
-      await Deno.readFile(join(directory, "test.wasm")),
+      await readFile(join(directory, "test.wasm")),
     );
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   // Schema table copied from codegen.proto, without reading the WAT descriptors.
@@ -144,13 +147,8 @@ Deno.test("WAT protocol", async () => {
           value(n, w, nesting + 1);
         }
       }
-      const length = wire === 2
-        ? readVarint()
-        : wire === 1
-        ? 8n
-        : wire === 5
-        ? 4n
-        : -1n;
+      const length =
+        wire === 2 ? readVarint() : wire === 1 ? 8n : wire === 5 ? 4n : -1n;
       if (length < 0n || length > BigInt(bytes.length - p)) {
         throw new Error("length");
       }
@@ -169,21 +167,22 @@ Deno.test("WAT protocol", async () => {
       let decoded;
       if (kind === "v" || kind === "i") {
         assert.equal(typeof raw, "bigint");
-        decoded = kind === "v"
-          ? raw !== 0n
-          : Number(BigInt.asIntN(32, raw as bigint));
+        decoded =
+          kind === "v" ? raw !== 0n : Number(BigInt.asIntN(32, raw as bigint));
       } else {
         assert.ok(Buffer.isBuffer(raw));
         if (kind === "s") decoded = decoder.decode(raw);
         else if (kind === "b") decoded = raw.toString("hex");
-        else {decoded = reference(
+        else {
+          decoded = reference(
             raw,
             kind,
             repeated
               ? undefined
-              : result[Number(number)] as Message | undefined,
+              : (result[Number(number)] as Message | undefined),
             depth + 1,
-          );}
+          );
+        }
       }
       if (repeated) {
         ((result[Number(number)] ??= []) as FieldValue[]).push(decoded);
@@ -193,8 +192,10 @@ Deno.test("WAT protocol", async () => {
   }
 
   class Exit extends Error {
-    constructor(readonly code: number) {
+    readonly code: number;
+    constructor(code: number) {
       super(`WASI exit ${code}`);
+      this.code = code;
     }
   }
 
@@ -244,7 +245,8 @@ Deno.test("WAT protocol", async () => {
         if (typeof kind === "number") return actual(r);
         if (kind === "v") return api.number(r, f) !== 0;
         if (kind === "i") return api.number(r, f);
-        const p = api.text_ptr(r, f), length = api.text_len(r, f);
+        const p = api.text_ptr(r, f),
+          length = api.text_len(r, f);
         assert.ok(
           p >= base && p + length <= api.text_end.value,
           "Text pointer escapes the compacted input prefix",
@@ -271,9 +273,12 @@ Deno.test("WAT protocol", async () => {
           view.getUint32(api.slot(record, n) + 4, true),
           "Repeated tail pointer differs",
         );
-      } else {result[Number(number)] = typeof kind === "number"
-          ? actual(api.child(record, n))
-          : item(record, n);}
+      } else {
+        result[Number(number)] =
+          typeof kind === "number"
+            ? actual(api.child(record, n))
+            : item(record, n);
+      }
     }
     return result;
   }
@@ -285,7 +290,8 @@ Deno.test("WAT protocol", async () => {
     type = 15,
   ) {
     const bytes = Buffer.from(input);
-    let expected, invalid = false;
+    let expected,
+      invalid = false;
     try {
       expected = reference(bytes, type);
     } catch {
@@ -357,14 +363,18 @@ Deno.test("WAT protocol", async () => {
           );
         } else if (kind === "v") {
           fields.push(intField(Number(number), variant ? 0 : 0x100000000n));
-        } else {fields.push(dataField(
-            Number(number),
-            typeof kind === "number"
-              ? populated(kind, variant)
-              : kind === "b"
-              ? Buffer.from([0, 255, 128, variant])
-              : `type${type}/field${number}/${i}/${variant}/日本語😀`,
-          ));}
+        } else {
+          fields.push(
+            dataField(
+              Number(number),
+              typeof kind === "number"
+                ? populated(kind, variant)
+                : kind === "b"
+                  ? Buffer.from([0, 255, 128, variant])
+                  : `type${type}/field${number}/${i}/${variant}/日本語😀`,
+            ),
+          );
+        }
       }
     }
     return concat(...fields);
@@ -420,12 +430,13 @@ Deno.test("WAT protocol", async () => {
     catalogRegression,
     6,
   );
-  for (
-    const [name, bytes] of [["bad tag", [0]], ["truncated child", [10, 4, 1]], [
-      "overflowing scalar",
-      [8, ...Array(9).fill(255), 2],
-    ], ["unknown fixed64", [201, 62, 1, 2, 3, 4, 5, 6, 7, 8]]] as const
-  ) compare(name, bytes);
+  for (const [name, bytes] of [
+    ["bad tag", [0]],
+    ["truncated child", [10, 4, 1]],
+    ["overflowing scalar", [8, ...Array(9).fill(255), 2]],
+    ["unknown fixed64", [201, 62, 1, 2, 3, 4, 5, 6, 7, 8]],
+  ] as const)
+    compare(name, bytes);
   for (const depth of [98, 99, 100] as const) {
     const groups = concat(
       ...Array(depth).fill(tag(500, 3)),
@@ -458,12 +469,13 @@ Deno.test("WAT protocol", async () => {
     return state >>> 0;
   };
   for (let i = 0; i < 1500; i++) {
-    const type = 1 + random() % 16;
-    let bytes = i % 2
-      ? Buffer.from(Uint8Array.from({ length: random() % 64 }, random))
-      : populated(type, i % 3);
+    const type = 1 + (random() % 16);
+    let bytes =
+      i % 2
+        ? Buffer.from(Uint8Array.from({ length: random() % 64 }, random))
+        : populated(type, i % 3);
     if (i % 2 === 0) {
-      for (let j = 0; j < 1 + random() % 4; j++) {
+      for (let j = 0; j < 1 + (random() % 4); j++) {
         bytes[random() % bytes.length] = random();
       }
       if (i % 3 === 0) bytes = bytes.subarray(0, random() % bytes.length);
@@ -471,14 +483,12 @@ Deno.test("WAT protocol", async () => {
     compare(`deterministic mutation ${i}`, bytes, type);
   }
 
-  const corpus = Deno.args[0];
+  const corpus = process.env.PROTOCOL_CORPUS;
   if (corpus) {
-    for (
-      const name of (await filenames(corpus)).filter((name) =>
-        name.endsWith(".json")
-      ).sort()
-    ) {
-      const record = JSON.parse(await Deno.readTextFile(join(corpus, name)));
+    for (const name of (await filenames(corpus))
+      .filter((name) => name.endsWith(".json"))
+      .sort()) {
+      const record = JSON.parse(await readFile(join(corpus, name), "utf8"));
       if (!record.non_wire_reason) {
         compare(
           `reference corpus ${name}`,

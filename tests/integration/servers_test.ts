@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- Driver stubs must return promises, including thrown failures.
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as pg from "./.generated/node-pg/wasm/query_sql.ts";
@@ -18,7 +17,8 @@ const authorValues: unknown[] = [7, "Ada", null, 2.5];
 test("pg uses bound values, array row mode, counts, null rows, and propagates failures", async () => {
   const calls: unknown[] = [];
   let rows: unknown[][] = [authorValues];
-  // deno-lint-ignore prefer-const -- The query stub reads this before it is assigned.
+  // The query stub reads this before the later assignment.
+  // eslint-disable-next-line prefer-const
   let failure: Error | undefined;
   const database: PgDatabase = {
     async query(config) {

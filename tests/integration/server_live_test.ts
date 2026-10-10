@@ -6,9 +6,11 @@ import postgres from "postgres";
 import mysql from "mysql2/promise";
 
 // These databases are test-only: the tests create and drop their own tables.
-const pgURL = process.env.SQLC_LIVE_PG_URL ??
+const pgURL =
+  process.env.SQLC_LIVE_PG_URL ??
   "postgres://sqlc_test:sqlc_test@127.0.0.1:55432/sqlc_test";
-const mysqlURL = process.env.SQLC_LIVE_MYSQL_URL ??
+const mysqlURL =
+  process.env.SQLC_LIVE_MYSQL_URL ??
   "mysql://sqlc_test:sqlc_test@127.0.0.1:53306/sqlc_test";
 const enabled = process.env.SQLC_LIVE_TEST === "1";
 const generated = (driver: string) =>
@@ -23,10 +25,7 @@ const schema = (engine: string) =>
   readFile(new URL(`./live/${engine}/schema.sql`, import.meta.url), "utf8");
 const baseSchema = (engine: string) =>
   readFile(
-    new URL(
-      `../fixtures/${engine}/schema.sql`,
-      import.meta.url,
-    ),
+    new URL(`../fixtures/${engine}/schema.sql`, import.meta.url),
     "utf8",
   );
 
@@ -73,12 +72,10 @@ test(
           q.getAuthor(client, { id: 2 }),
         ]),
       );
-      assert.deepEqual(rows.map((row) => row?.name ?? null), [
-        "connection 0",
-        null,
-        "connection 1",
-        null,
-      ]);
+      assert.deepEqual(
+        rows.map((row) => row?.name ?? null),
+        ["connection 0", null, "connection 1", null],
+      );
       const client = clients[0]!;
       await assert.rejects(q.getAuthor(client, {}), {
         name: "QueryCodecError",
@@ -119,17 +116,19 @@ test(
         );
       }
       const after = process.memoryUsage();
-      console.log(JSON.stringify({
-        driver: "pg",
-        server:
-          (await client.query("SHOW server_version")).rows[0].server_version,
-        policy: "unnamed (generated default)",
-        calls: 200,
-        milliseconds,
-        retainedNamedStatements: 0,
-        rssDelta: after.rss - before.rss,
-        heapUsedDelta: after.heapUsed - before.heapUsed,
-      }));
+      console.log(
+        JSON.stringify({
+          driver: "pg",
+          server: (await client.query("SHOW server_version")).rows[0]
+            .server_version,
+          policy: "unnamed (generated default)",
+          calls: 200,
+          milliseconds,
+          retainedNamedStatements: 0,
+          rssDelta: after.rss - before.rss,
+          heapUsedDelta: after.heapUsed - before.heapUsed,
+        }),
+      );
     } finally {
       for (const client of clients) client.release(true);
     }
@@ -137,15 +136,14 @@ test(
       const live = await generated("pg");
       assert.deepEqual(
         await Promise.all(
-          Array.from(
-            { length: 8 },
-            (_, index) => live.literalProbe(pool, { arg1: String(index) }),
+          Array.from({ length: 8 }, (_, index) =>
+            live.literalProbe(pool, { arg1: String(index) }),
           ),
         ),
-        Array.from(
-          { length: 8 },
-          (_, index) => ({ literal: "?", value: String(index) }),
-        ),
+        Array.from({ length: 8 }, (_, index) => ({
+          literal: "?",
+          value: String(index),
+        })),
       );
     } finally {
       await pool.end();
@@ -187,10 +185,10 @@ test(
       const results = await Promise.all(
         reserved.map((connection) => q.getAuthor(connection, { id: 1 })),
       );
-      assert.deepEqual(results.map((row) => row.name), [
-        "connection 0",
-        "connection 1",
-      ]);
+      assert.deepEqual(
+        results.map((row) => row.name),
+        ["connection 0", "connection 1"],
+      );
       const connection = reserved[0]!;
       await assert.rejects(q.getAuthor(connection, {}), {
         name: "QueryCodecError",
@@ -228,24 +226,25 @@ test(
         preparationBaseline,
       );
       const after = process.memoryUsage();
-      console.log(JSON.stringify({
-        driver: "postgres.js",
-        policy:
-          "unsafe prepare:false (generated default), connection prepare:true",
-        calls: 200,
-        milliseconds,
-        retainedGeneratedStatements: 0,
-        retainedDriverStartupStatements: preparationBaseline[0]!.length,
-        rssDelta: after.rss - before.rss,
-        heapUsedDelta: after.heapUsed - before.heapUsed,
-      }));
+      console.log(
+        JSON.stringify({
+          driver: "postgres.js",
+          policy:
+            "unsafe prepare:false (generated default), connection prepare:true",
+          calls: 200,
+          milliseconds,
+          retainedGeneratedStatements: 0,
+          retainedDriverStartupStatements: preparationBaseline[0]!.length,
+          rssDelta: after.rss - before.rss,
+          heapUsedDelta: after.heapUsed - before.heapUsed,
+        }),
+      );
       // A driver-owned cursor keeps one physical connection busy. Generated
       // reads on another reserved connection must neither close nor steal it.
       let cursorRows = 0;
-      for await (
-        const rows of connection.unsafe("SELECT generate_series(1, 3) AS id")
-          .cursor(1)
-      ) {
+      for await (const rows of connection
+        .unsafe("SELECT generate_series(1, 3) AS id")
+        .cursor(1)) {
         cursorRows += rows.length;
         assert.equal(
           (await q.getAuthor(reserved[1], { id: 1 })).name,
@@ -257,19 +256,21 @@ test(
       for (const connection of reserved) connection.release();
     }
     try {
-      await Promise.all([0, 1].map(async (index) => {
-        await assert.rejects(
-          sql.begin(async (tx) => {
-            await q.renameAuthor(tx, { id: 1, name: `rollback ${index}` });
-            assert.equal(
-              (await q.getAuthor(tx, { id: 1 })).name,
-              `rollback ${index}`,
-            );
-            throw new Error("rollback lifetime test");
-          }),
-          /rollback lifetime test/,
-        );
-      }));
+      await Promise.all(
+        [0, 1].map(async (index) => {
+          await assert.rejects(
+            sql.begin(async (tx) => {
+              await q.renameAuthor(tx, { id: 1, name: `rollback ${index}` });
+              assert.equal(
+                (await q.getAuthor(tx, { id: 1 })).name,
+                `rollback ${index}`,
+              );
+              throw new Error("rollback lifetime test");
+            }),
+            /rollback lifetime test/,
+          );
+        }),
+      );
       // Use the documented idle lifetime to replace a physical connection
       // while keeping the same pool handle. The driver's internal close()
       // method is absent from its published Sql type and is not used here.
@@ -332,16 +333,16 @@ test(
         await client.query(temporaryAuthors);
         await q.insertAuthor(client, { id: 1, name: `connection ${index}` });
       }
-      const results = await Promise.all(clients.flatMap((client) => [
-        q.getAuthor(client, { id: 1 }),
-        q.getAuthor(client, { id: 2 }),
-      ]));
-      assert.deepEqual(results.map((row) => row?.name ?? null), [
-        "connection 0",
-        null,
-        "connection 1",
-        null,
-      ]);
+      const results = await Promise.all(
+        clients.flatMap((client) => [
+          q.getAuthor(client, { id: 1 }),
+          q.getAuthor(client, { id: 2 }),
+        ]),
+      );
+      assert.deepEqual(
+        results.map((row) => row?.name ?? null),
+        ["connection 0", null, "connection 1", null],
+      );
       const client = clients[0]!;
       const initial = await mysqlStatus(client);
       await assert.rejects(q.getAuthor(client, {}), {
@@ -420,22 +421,26 @@ test(
         120,
       );
       assert(churnAfter.Com_stmt_close! - churnBefore.Com_stmt_close! >= 117);
-      console.log(JSON.stringify({
-        driver: "mysql2",
-        server: (await client.query<mysql.RowDataPacket[]>(
-          "SELECT VERSION() AS version",
-        ))[0][0]!.version,
-        policy: "execute driver LRU, capacity 3 per physical connection",
-        calls: 200,
-        milliseconds,
-        repeatPreparations: 0,
-        churnPreparations: churnAfter.Com_stmt_prepare! -
-          churnBefore.Com_stmt_prepare!,
-        churnCloses: churnAfter.Com_stmt_close! - churnBefore.Com_stmt_close!,
-        retainedStatementBound: 6,
-        rssDelta: after.rss - before.rss,
-        heapUsedDelta: after.heapUsed - before.heapUsed,
-      }));
+      console.log(
+        JSON.stringify({
+          driver: "mysql2",
+          server: (
+            await client.query<mysql.RowDataPacket[]>(
+              "SELECT VERSION() AS version",
+            )
+          )[0][0]!.version,
+          policy: "execute driver LRU, capacity 3 per physical connection",
+          calls: 200,
+          milliseconds,
+          repeatPreparations: 0,
+          churnPreparations:
+            churnAfter.Com_stmt_prepare! - churnBefore.Com_stmt_prepare!,
+          churnCloses: churnAfter.Com_stmt_close! - churnBefore.Com_stmt_close!,
+          retainedStatementBound: 6,
+          rssDelta: after.rss - before.rss,
+          heapUsedDelta: after.heapUsed - before.heapUsed,
+        }),
+      );
       await client.reset();
       await client.query(temporaryAuthors);
       await q.insertAuthor(client, { id: 1, name: "after reset" });
@@ -476,9 +481,8 @@ test(
     // COM_STMT_CLOSE has no acknowledgement. A round trip on each owning
     // connection above orders eviction; after pool.end(), poll the server.
     for (let attempt = 0; attempt < 20; attempt++) {
-      if (
-        (await mysqlStatus(observer, true)).Prepared_stmt_count === baseline
-      ) break;
+      if ((await mysqlStatus(observer, true)).Prepared_stmt_count === baseline)
+        break;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(
@@ -636,45 +640,44 @@ test(
       await client.query(
         "DROP TABLE IF EXISTS live_probes, live_insert_ids, live_unsigned_insert_ids, records, authors",
       );
-      for (
-        const statement
-          of ((await schema("mysql")) + (await baseSchema("mysql"))).split(";")
-            .filter((x) => x.trim())
-      ) {
+      for (const statement of (
+        (await schema("mysql")) + (await baseSchema("mysql"))
+      )
+        .split(";")
+        .filter((x) => x.trim())) {
         await client.query(statement);
       }
       const q = await generated("mysql2");
-      const { QueryCodecError } = await import(
-        new URL("./.generated/live/mysql2/codec_error.ts", import.meta.url)
-          .href
-      ) as typeof import("./.generated/live/mysql2/codec_error.ts");
-      const codecFailure = (
-        query: string,
-        expectedType: "number" | "bigint",
-        message: RegExp,
-      ) =>
-      (error: unknown): boolean => {
-        assert(error instanceof QueryCodecError);
-        assert(error instanceof TypeError);
-        assert.equal(error.query, query);
-        assert.equal(error.file, "query.sql");
-        assert.equal(error.field, "lastInsertId");
-        assert.equal(error.expectedType, expectedType);
-        assert.equal(error.phase, "decode");
-        const cause = error.originalCause();
-        assert(cause instanceof RangeError);
-        assert.match(cause.message, message);
-        assert(error.cause instanceof Error);
-        assert.equal(error.cause.message, "Value conversion failed");
-        return true;
-      };
+      const { QueryCodecError } = (await import(
+        new URL("./.generated/live/mysql2/codec_error.ts", import.meta.url).href
+      )) as typeof import("./.generated/live/mysql2/codec_error.ts");
+      const codecFailure =
+        (query: string, expectedType: "number" | "bigint", message: RegExp) =>
+        (error: unknown): boolean => {
+          assert(error instanceof QueryCodecError);
+          assert(error instanceof TypeError);
+          assert.equal(error.query, query);
+          assert.equal(error.file, "query.sql");
+          assert.equal(error.field, "lastInsertId");
+          assert.equal(error.expectedType, expectedType);
+          assert.equal(error.phase, "decode");
+          const cause = error.originalCause();
+          assert(cause instanceof RangeError);
+          assert.match(cause.message, message);
+          assert(error.cause instanceof Error);
+          assert.equal(error.cause.message, "Value conversion failed");
+          return true;
+        };
       const base = await existing("node-mysql2");
       const ids: number[] = [];
-      for (
-        const document of ["text", [1, "two", { nested: true }], {
+      for (const document of [
+        "text",
+        [1, "two", { nested: true }],
+        {
           object: [1, 2],
-        }, null]
-      ) {
+        },
+        null,
+      ]) {
         const id = await q.insertProbe(client, { document });
         ids.push(id);
         assert.deepEqual(await q.getProbe(client, { id }), {

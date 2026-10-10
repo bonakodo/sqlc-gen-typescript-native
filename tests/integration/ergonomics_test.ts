@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
-import { Database } from "@bonakodo/sqlite";
-import { createQueries } from "./.generated/ergonomics-db-sqlite/wasm/index.ts";
-import { QueryCodecError } from "./.generated/ergonomics-db-sqlite/wasm/codec_error.ts";
+import Database from "better-sqlite3";
+import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { inspect } from "node:util";
+import { createQueries } from "./.generated/ergonomics-better-sqlite3/wasm/index.ts";
+import { QueryCodecError } from "./.generated/ergonomics-better-sqlite3/wasm/codec_error.ts";
 
-const schema = await Deno.readTextFile(
-  new URL(
-    "../fixtures/ergonomics/schema.sql",
-    import.meta.url,
-  ),
+const schema = readFileSync(
+  new URL("../fixtures/ergonomics/schema.sql", import.meta.url),
+  "utf8",
 );
 
-Deno.test("bound queries preserve codecs, optional inputs, SQL null, and transaction scope", () => {
-  using database = new Database(":memory:");
+test("bound queries preserve codecs, optional inputs, SQL null, and transaction scope", (t) => {
+  const database = new Database(":memory:");
+  t.after(() => database.close());
   database.exec(schema);
   const queries = createQueries(database).query;
   assert.equal(queries.getAuthor({ id: 1 }), null);
@@ -48,7 +50,7 @@ Deno.test("bound queries preserve codecs, optional inputs, SQL null, and transac
   assert.deepEqual(queries.findAuthors({ ids: [1] }), [author]);
 
   const expiresAt = new Date(createdAt.getTime() + 1_000);
-  using insertRecord = database.prepare("INSERT INTO records VALUES (?, ?, ?)");
+  const insertRecord = database.prepare("INSERT INTO records VALUES (?, ?, ?)");
   insertRecord.run(1, 1, expiresAt.getTime());
   assert.deepEqual(queries.getLatestExpiry({ authorId: 1 }), {
     latestExpiry: expiresAt,
@@ -72,7 +74,7 @@ Deno.test("bound queries preserve codecs, optional inputs, SQL null, and transac
   assert.equal(queries.listAuthors().length, 1);
 
   // Numeric storage stays numeric even though the application receives Date/boolean.
-  using stored = database.prepare(
+  const stored = database.prepare(
     "SELECT typeof(created_at) AS timestamp_type, active, typeof(settings) AS json_type FROM authors WHERE id = 1",
   );
   assert.deepEqual(stored.get(), {
@@ -82,8 +84,9 @@ Deno.test("bound queries preserve codecs, optional inputs, SQL null, and transac
   });
 });
 
-Deno.test("query errors identify fields without exposing values and preserve driver errors", () => {
-  using database = new Database(":memory:");
+test("query errors identify fields without exposing values and preserve driver errors", (t) => {
+  const database = new Database(":memory:");
+  t.after(() => database.close());
   database.exec(schema);
   const queries = createQueries(database).query;
   const input = {
@@ -94,25 +97,31 @@ Deno.test("query errors identify fields without exposing values and preserve dri
     settings: { private: "private-value" },
   };
   queries.createAuthor(input);
-  assert.throws(() => queries.createAuthor(input), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.ok(!(error instanceof QueryCodecError));
-    return /UNIQUE/.test(error.message);
-  });
-  using corrupt = database.prepare(
+  assert.throws(
+    () => queries.createAuthor(input),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.ok(!(error instanceof QueryCodecError));
+      return /UNIQUE/.test(error.message);
+    },
+  );
+  const corrupt = database.prepare(
     "UPDATE authors SET created_at = ? WHERE id = 1",
   );
   corrupt.run("private-invalid-timestamp");
-  assert.throws(() => queries.getAuthor({ id: 1 }), (error: unknown) => {
-    assert.ok(error instanceof QueryCodecError);
-    const printable = `${String(error)} ${Deno.inspect(error)} ${
-      JSON.stringify(error)
-    }`;
-    assert.match(printable, /GetAuthor/);
-    assert.match(printable, /createdAt/);
-    assert.ok(!printable.includes("private-invalid-timestamp"));
-    return true;
-  });
+  assert.throws(
+    () => queries.getAuthor({ id: 1 }),
+    (error: unknown) => {
+      assert.ok(error instanceof QueryCodecError);
+      const printable = `${String(error)} ${inspect(error)} ${JSON.stringify(
+        error,
+      )}`;
+      assert.match(printable, /GetAuthor/);
+      assert.match(printable, /createdAt/);
+      assert.ok(!printable.includes("private-invalid-timestamp"));
+      return true;
+    },
+  );
   assert.throws(
     () => queries.getAuthor({ id: Number.MAX_SAFE_INTEGER + 1 }),
     QueryCodecError,

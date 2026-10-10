@@ -1,3 +1,4 @@
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspect } from "node:util";
 import {
@@ -14,7 +15,7 @@ import { QueryCodecError as ServerQueryCodecError } from "./.generated/server/co
 const query = ["ReadEntries", "queries/entries.sql"] as const;
 const field = ["entry.value", "number"] as const;
 
-Deno.test("successful conversions do not read query or field metadata", () => {
+test("successful conversions do not read query or field metadata", () => {
   const unread = <T extends readonly string[]>(value: T): T =>
     new Proxy(value, {
       get() {
@@ -77,7 +78,7 @@ Deno.test("successful conversions do not read query or field metadata", () => {
   );
 });
 
-Deno.test("separate metadata retains conversion errors and keeps custom causes private", () => {
+test("separate metadata retains conversion errors and keeps custom causes private", () => {
   const secret = "private-input-value";
   const cause = new Error(secret, { cause: { value: secret } });
   const codec = {
@@ -88,12 +89,10 @@ Deno.test("separate metadata retains conversion errors and keeps custom causes p
       throw cause;
     },
   };
-  for (
-    const [runtime, errorType] of [
-      [sqlite, QueryCodecError],
-      [server, ServerQueryCodecError],
-    ] as const
-  ) {
+  for (const [runtime, errorType] of [
+    [sqlite, QueryCodecError],
+    [server, ServerQueryCodecError],
+  ] as const) {
     for (const phase of ["encode", "decode"] as const) {
       const convert = () =>
         phase === "encode"
@@ -108,7 +107,7 @@ Deno.test("separate metadata retains conversion errors and keeps custom causes p
         assert.equal(error.expectedType, field[1]);
         assert.equal(error.originalCause(), cause);
         assert(!inspect(error).includes(secret));
-        assert(!Deno.inspect(error).includes(secret));
+        assert(!inspect(error).includes(secret));
         assert(!JSON.stringify(error).includes(secret));
         return true;
       });
@@ -116,7 +115,7 @@ Deno.test("separate metadata retains conversion errors and keeps custom causes p
   }
 });
 
-Deno.test("slice failures retain matching errors and recontextualize other fields", () => {
+test("slice failures retain matching errors and recontextualize other fields", () => {
   const cause = new Error("private-input-value");
   const inner = new QueryCodecError(
     codecContext(query, field),
@@ -126,31 +125,43 @@ Deno.test("slice failures retain matching errors and recontextualize other field
   const convert = () => {
     throw inner;
   };
-  assert.throws(() => encodeSlice([1], convert, query, field), (error) => {
-    assert.equal(error, inner);
-    return true;
-  });
+  assert.throws(
+    () => encodeSlice([1], convert, query, field),
+    (error) => {
+      assert.equal(error, inner);
+      return true;
+    },
+  );
   const other = ["entry.other", "string"] as const;
-  assert.throws(() => encodeSlice([1], convert, query, other), (error) => {
-    assert(error instanceof QueryCodecError);
-    assert.equal(error.field, other[0]);
-    assert.equal(error.expectedType, other[1]);
-    assert.equal(error.originalCause(), inner);
-    return true;
-  });
-  assert.throws(() => encodeSlice(null, Number, query, field), (error) => {
-    assert(error instanceof QueryCodecError);
-    assert.equal(error.phase, "encode");
-    assert.equal(error.field, field[0]);
-    return true;
-  });
-  assert.throws(() => encodeSlice([1], convert), (error) => {
-    assert.equal(error, inner);
-    return true;
-  });
+  assert.throws(
+    () => encodeSlice([1], convert, query, other),
+    (error) => {
+      assert(error instanceof QueryCodecError);
+      assert.equal(error.field, other[0]);
+      assert.equal(error.expectedType, other[1]);
+      assert.equal(error.originalCause(), inner);
+      return true;
+    },
+  );
+  assert.throws(
+    () => encodeSlice(null, Number, query, field),
+    (error) => {
+      assert(error instanceof QueryCodecError);
+      assert.equal(error.phase, "encode");
+      assert.equal(error.field, field[0]);
+      return true;
+    },
+  );
+  assert.throws(
+    () => encodeSlice([1], convert),
+    (error) => {
+      assert.equal(error, inner);
+      return true;
+    },
+  );
 });
 
-Deno.test("separate metadata wraps built-in scalar and array failures", () => {
+test("separate metadata wraps built-in scalar and array failures", () => {
   const operations: [
     () => unknown,
     "encode" | "decode",

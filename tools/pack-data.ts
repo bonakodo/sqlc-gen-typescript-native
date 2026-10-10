@@ -1,3 +1,4 @@
+import { readFile, writeFile } from "node:fs/promises";
 /** Pack active WAT data without changing executable source text. */
 export const STATIC_LIMIT = 4 * 1024 * 1024;
 export const PACKED_BEGIN = 32 * 1024 * 1024;
@@ -59,9 +60,11 @@ export function* tokens(source: string): Generator<Token> {
     } else {
       const begin = at;
       while (
-        at < source.length && !isWhitespace(source[at]) &&
+        at < source.length &&
+        !isWhitespace(source[at]) &&
         !'()"'.includes(source[at])
-      ) at++;
+      )
+        at++;
       yield { word: source.slice(begin, at), begin, end: at };
     }
   }
@@ -123,7 +126,8 @@ export function stringBytes(word: string): Uint8Array {
 
 /** Read active constant-offset data, preserving declaration order. */
 export function readData(source: string): DataSegment[] {
-  const items = [...tokens(source)], result: DataSegment[] = [];
+  const items = [...tokens(source)],
+    result: DataSegment[] = [];
   if (items[0]?.word !== "(" || items[1]?.word !== "module") {
     throw new Error("Expected a complete WAT module");
   }
@@ -132,7 +136,8 @@ export function readData(source: string): DataSegment[] {
     const { word, begin } = items[at];
     if (word === "(" && depth === 1 && items[at + 1]?.word === "data") {
       if (
-        items[at + 2]?.word !== "(" || items[at + 3]?.word !== "i32.const" ||
+        items[at + 2]?.word !== "(" ||
+        items[at + 3]?.word !== "i32.const" ||
         items[at + 5]?.word !== ")"
       ) {
         throw new Error(
@@ -146,8 +151,8 @@ export function readData(source: string): DataSegment[] {
       const normalized = literal.replaceAll("_", "");
       const sign = normalized.startsWith("-") ? -1 : 1;
       const magnitude = normalized.replace(/^[+-]/, "");
-      const address = sign *
-        Number.parseInt(magnitude, /^0x/i.test(magnitude) ? 16 : 10);
+      const address =
+        sign * Number.parseInt(magnitude, /^0x/i.test(magnitude) ? 16 : 10);
       let end = at + 6;
       const data: Uint8Array[] = [];
       while (items[end]?.word.startsWith('"')) {
@@ -158,7 +163,9 @@ export function readData(source: string): DataSegment[] {
       }
       const length = data.reduce((sum, part) => sum + part.length, 0);
       if (
-        address < 0 || address > STATIC_LIMIT || length > STATIC_LIMIT - address
+        address < 0 ||
+        address > STATIC_LIMIT ||
+        length > STATIC_LIMIT - address
       ) {
         throw new Error("Static data must fit below 4 MiB");
       }
@@ -189,7 +196,9 @@ export function layout(
   let size = 0;
   for (const { address, bytes } of data) {
     if (
-      !Number.isInteger(address) || address < 0 || address > STATIC_LIMIT ||
+      !Number.isInteger(address) ||
+      address < 0 ||
+      address > STATIC_LIMIT ||
       bytes.length > STATIC_LIMIT - address
     ) {
       throw new Error("Static data must fit below 4 MiB");
@@ -199,20 +208,22 @@ export function layout(
   const image = new Uint8Array(size);
   for (const { address, bytes } of data) image.set(bytes, address);
   const ranges: [number, number][] = [];
-  for (
-    const { address, bytes } of [...data].sort((a, b) => a.address - b.address)
-  ) {
+  for (const { address, bytes } of [...data].sort(
+    (a, b) => a.address - b.address,
+  )) {
     if (!bytes.length) continue;
-    const end = address + bytes.length, last = ranges.at(-1);
+    const end = address + bytes.length,
+      last = ranges.at(-1);
     if (last && address <= last[1] + 8) last[1] = Math.max(end, last[1]);
     else ranges.push([address, end]);
   }
-  const length = 4 + ranges.length * 8 +
-    ranges.reduce((sum, [a, b]) => sum + b - a, 0);
+  const length =
+    4 + ranges.length * 8 + ranges.reduce((sum, [a, b]) => sum + b - a, 0);
   if (length > SCRATCH_LIMIT) {
     throw new Error("Static layout exceeds the 1 MiB decoder scratch bound");
   }
-  const result = new Uint8Array(length), view = new DataView(result.buffer);
+  const result = new Uint8Array(length),
+    view = new DataView(result.buffer);
   view.setUint32(0, ranges.length, true);
   let cursor = 4 + ranges.length * 8;
   ranges.forEach(([begin, end], i) => {
@@ -229,10 +240,15 @@ export function pack(data: Uint8Array): Uint8Array {
   if (data.length > SCRATCH_LIMIT) {
     throw new Error("Static layout exceeds the 1 MiB decoder scratch bound");
   }
-  const result: number[] = [], chains = new Map<number, number[]>();
-  let anchor = 0, position = 0;
+  const result: number[] = [],
+    chains = new Map<number, number[]>();
+  let anchor = 0,
+    position = 0;
   const key = (at: number) =>
-    data[at] | data[at + 1] << 8 | data[at + 2] << 16 | data[at + 3] << 24;
+    data[at] |
+    (data[at + 1] << 8) |
+    (data[at + 2] << 16) |
+    (data[at + 3] << 24);
   const extension = (length: number) => {
     while (length >= 255) {
       result.push(255);
@@ -244,12 +260,13 @@ export function pack(data: Uint8Array): Uint8Array {
     if (at + 4 > data.length) return;
     const word = key(at);
     let chain = chains.get(word);
-    if (!chain) chains.set(word, chain = []);
+    if (!chain) chains.set(word, (chain = []));
     chain.push(at);
     while (at - chain[0] > 65535 || chain.length > 256) chain.shift();
   };
   while (position + 4 <= data.length) {
-    let best = 0, distance = 0;
+    let best = 0,
+      distance = 0;
     const chain = chains.get(key(position)) ?? [];
     for (let i = chain.length - 1; i >= 0; i--) {
       const earlier = chain[i];
@@ -258,7 +275,8 @@ export function pack(data: Uint8Array): Uint8Array {
       while (
         position + length < data.length &&
         data[earlier + length] === data[position + length]
-      ) length++;
+      )
+        length++;
       if (length > best) {
         best = length;
         distance = position - earlier;
@@ -269,7 +287,8 @@ export function pack(data: Uint8Array): Uint8Array {
       remember(position++);
       continue;
     }
-    const literal = position - anchor, match = best - 4;
+    const literal = position - anchor,
+      match = best - 4;
     result.push(Math.min(literal, 15) * 16 + Math.min(match, 15));
     if (literal >= 15) extension(literal - 15);
     for (let at = anchor; at < position; at++) result.push(data[at]);
@@ -297,7 +316,8 @@ export function unpack(data: Uint8Array): Uint8Array {
     throw new Error("Packed bytes exceed the 1 MiB decoder scratch bound");
   }
   const result = new Uint8Array(SCRATCH_LIMIT);
-  let cursor = 0, size = 0;
+  let cursor = 0,
+    size = 0;
   const byte = () => {
     if (cursor >= data.length) throw new Error("Truncated packed data");
     return data[cursor++];
@@ -312,7 +332,8 @@ export function unpack(data: Uint8Array): Uint8Array {
     return length;
   };
   while (cursor < data.length) {
-    const token = byte(), literal = token >> 4 === 15 ? extend(15) : token >> 4;
+    const token = byte(),
+      literal = token >> 4 === 15 ? extend(15) : token >> 4;
     if (literal > data.length - cursor || literal > SCRATCH_LIMIT - size) {
       throw new Error("Invalid packed literal length");
     }
@@ -320,7 +341,7 @@ export function unpack(data: Uint8Array): Uint8Array {
     size += literal;
     cursor += literal;
     if (cursor === data.length) break;
-    const distance = byte() | byte() << 8;
+    const distance = byte() | (byte() << 8);
     if (distance === 0 || distance > size) {
       throw new Error("Invalid packed backward distance");
     }
@@ -335,9 +356,11 @@ export function unpack(data: Uint8Array): Uint8Array {
   return result.slice(0, size);
 }
 
-export function transform(
-  source: string,
-): { source: string; unpackedSize: number; packedSize: number } {
+export function transform(source: string): {
+  source: string;
+  unpackedSize: number;
+  packedSize: number;
+} {
   const data = readData(source),
     original = layout(data),
     packed = pack(original);
@@ -345,10 +368,13 @@ export function transform(
   if (
     restored.length !== original.length ||
     restored.some((byte, i) => byte !== original[i])
-  ) throw new Error("Static data did not survive packing exactly");
+  )
+    throw new Error("Static data did not survive packing exactly");
   for (const { begin, end } of [...data].reverse()) {
-    source = source.slice(0, begin) +
-      "(; Static data restored by init_data. ;)" + source.slice(end);
+    source =
+      source.slice(0, begin) +
+      "(; Static data restored by init_data. ;)" +
+      source.slice(end);
   }
   const end = [...tokens(source)].at(-1);
   if (end?.word !== ")") throw new Error("Expected a complete WAT module");
@@ -370,20 +396,19 @@ export function transform(
 }
 
 if (import.meta.main) {
-  if (Deno.args.length !== 2) {
-    throw new Error(
-      "Usage: deno run --allow-read --allow-write tools/pack-data.ts source.wat output.wat",
-    );
+  if (process.argv.slice(2).length !== 2) {
+    throw new Error("Usage: node tools/pack-data.ts source.wat output.wat");
   }
   const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-    .decode(await Deno.readFile(Deno.args[0])).replace(/\r\n?/g, "\n");
+    .decode(await readFile(process.argv.slice(2)[0]))
+    .replace(/\r\n?/g, "\n");
   const result = transform(source);
-  await Deno.writeTextFile(Deno.args[1], result.source);
+  await writeFile(process.argv.slice(2)[1], result.source);
   console.log(
-    `Static data: ${
-      result.unpackedSize.toLocaleString("en-US")
-    } layout bytes -> ${
-      result.packedSize.toLocaleString("en-US")
-    } packed bytes`,
+    `Static data: ${result.unpackedSize.toLocaleString(
+      "en-US",
+    )} layout bytes -> ${result.packedSize.toLocaleString(
+      "en-US",
+    )} packed bytes`,
   );
 }

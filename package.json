@@ -1,0 +1,40 @@
+{
+  "name": "sqlc-gen-typescript-native",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26 <27"
+  },
+  "scripts": {
+    "tools": "./tools/setup-wasm-tools.sh",
+    "build": "./tools/build.sh",
+    "test": "./tools/test.sh",
+    "check": "npm run fmt:check && npm run lint && npm run typecheck && npm test",
+    "fmt": "prettier --write package.json tsconfig.json eslint.config.js \"tools/*.ts\" \"tests/{wasm,tools,integration,runtime}/*.ts\"",
+    "fmt:check": "prettier --check package.json tsconfig.json eslint.config.js \"tools/*.ts\" \"tests/{wasm,tools,integration,runtime}/*.ts\"",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "integration": "./tools/test-integration.sh",
+    "runtime": "./tools/test-runtime.sh",
+    "live": "./tools/test-server-live.sh"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "typescript": "6.0.3",
+    "prettier": "3.9.10",
+    "eslint": "10.12.0",
+    "typescript-eslint": "8.71.1",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/bun": "1.4.2",
+    "@types/pg": "8.23.1",
+    "better-sqlite3": "13.0.3",
+    "bun": "1.4.2",
+    "mysql2": "3.24.3",
+    "pg": "8.23.0",
+    "postgres": "3.4.9"
+  },
+  "allowScripts": {
+    "better-sqlite3": true,
+    "bun": true
+  }
+}

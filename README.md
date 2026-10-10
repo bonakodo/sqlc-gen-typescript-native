@@ -2,9 +2,9 @@
 
 A TypeScript generator for [sqlc](https://sqlc.dev), written directly in
 WebAssembly text (WAT). The WASI plugin turns sqlc's analyzed schema, queries,
-and options into TypeScript for Node, Bun, and Deno.
+and options into TypeScript for Node and Bun.
 
-WABT assembles the source and Binaryen optimizes it. Deno tools pack constant
+WABT assembles the source and Binaryen optimizes it. Node tools pack constant
 strings and TypeScript support templates into the module. Those
 [templates](src/templates/README.md) become generated files; the plugin runs WAT
 code. The module uses fixed 64 MiB memory, explicit bounds checks, and no
@@ -36,20 +36,21 @@ config.
 
 ## Build locally
 
-Install [Deno](https://deno.com/) 2.9 or later, then run:
+Install [Node.js](https://nodejs.org/) 26, then run:
 
 ```sh
-deno task tools
-deno task build
+npm ci
+npm run tools
+npm run build
 ```
 
-`deno task tools` downloads WABT 1.0.41 and Binaryen 132, verifies their SHA-256
+`npm run tools` downloads WABT 1.0.41 and Binaryen 132, verifies their SHA-256
 hashes, and extracts them into the ignored `bin/.tools` directory. It supports
 Linux on arm64 and amd64 and macOS on arm64. On macOS amd64, supply your own
 WABT 1.0.41 executables. It changes no system settings. Ordinary builds do not
-install native tools. Deno may fetch standard-library packages on first use;
-`deno.lock` pins those dependencies. Set `WAT2WASM`, `WASM2WAT`, `WASMOPT`, or
-`DENO` to select explicit executable paths.
+install native tools. `npm ci` installs the dependencies pinned in
+`package-lock.json`. Set `WAT2WASM`, `WASM2WAT`, `WASMOPT`, or
+`NODE` to select explicit executable paths.
 
 The build writes these files under `bin/`:
 
@@ -60,9 +61,9 @@ The build writes these files under `bin/`:
 - `sqlc-gen-typescript-native.packed.wat`: combined source with packed data.
 
 The default packs static data losslessly and restores it at startup.
-`PACK_DATA=0 deno task build` leaves it unpacked for inspection and comparison.
+`PACK_DATA=0 npm run build` leaves it unpacked for inspection and comparison.
 
-The build needs no Go, TinyGo, protoc, Node, Bun, database, or TypeScript
+The build needs no Go, TinyGo, protoc, Bun, database, or TypeScript
 compiler.
 
 Use the absolute path to the local WASM file:
@@ -97,60 +98,114 @@ v1.31.1.
 
 ## Drivers and runtimes
 
-| Engine     | Driver             | Node | Bun | Deno |
-| ---------- | ------------------ | ---- | --- | ---- |
-| PostgreSQL | `pg`               | yes  | yes | yes  |
-| PostgreSQL | `postgres`         | yes  | yes | yes  |
-| MySQL      | `mysql2`           | yes  | yes | yes  |
-| SQLite     | `better-sqlite3`   | yes  | yes | yes  |
-| SQLite     | `@bonakodo/sqlite` | —    | —   | yes  |
+| Engine     | Driver           | Node | Bun |
+| ---------- | ---------------- | ---- | --- |
+| PostgreSQL | `pg`             | yes  | yes |
+| PostgreSQL | `postgres`       | yes  | yes |
+| MySQL      | `mysql2`         | yes  | yes |
+| SQLite     | `better-sqlite3` | yes  | yes |
+| SQLite     | `node:sqlite`    | yes  | yes |
+| SQLite     | `bun:sqlite`     | —    | yes |
 
 `runtime` defaults to `node`; `driver` is required. Engine/driver mismatches
 fail before sqlc receives output files. Generated imports use bare package
-names, including `@bonakodo/sqlite` and `mysql2/promise`. Put full Deno
-specifiers and version pins in your application's `deno.json` `imports`, for
-example:
-
-```json
-{
-  "imports": {
-    "postgres": "npm:postgres@3.4.9"
-  }
-}
-```
-
-Registry-prefixed and versioned Deno driver options remain accepted, but only
-select the driver; the import map controls its version. Pin Node and Bun
-dependencies in `package.json`.
+names, including `mysql2/promise`. Pin dependencies in `package.json`.
+Deno output and `@bonakodo/sqlite` are no longer supported. Use Node or Bun
+with a driver listed above.
 
 For `pg` and `better-sqlite3`, install their `@types` packages. Queries that use
 PostgreSQL intervals with `pg` also import the `postgres-interval` type package;
 add it as a direct dependency when your package manager restricts transitive
-imports. Deno output includes bare `@deno-types` hints; map `@types/pg` and
-`@types/better-sqlite3` to their full specifiers in `imports` when using those
-drivers. Map `postgres-interval` there when using PostgreSQL intervals with
-`pg`. Generated Node and Bun modules use `.ts` relative imports; use a runtime
-that supports them, or TypeScript's `rewriteRelativeImportExtensions` when
-emitting JavaScript. See the checked configuration in
-`tests/integration/tsconfig.json`. The test and example import maps resolve
-`@bonakodo/sqlite` to the published `jsr:@bonakodo/sqlite@0.1.0` package.
-Generated code uses the bare package name so applications can supply their own
-import map. The SQLite runtime configures `safeIntegers()` and `raw()` per
-statement, then calls `get()`, `all()`, or `run()`. For `@bonakodo/sqlite`, it
-uses `Symbol.dispose` on eviction, errors, clearing, and uncached completion.
-Connection settings stay unchanged; JSON stays text or bytes without driver
-parsing.
+imports. Generated modules use `.ts` relative imports; use a runtime that
+supports them, or TypeScript's `rewriteRelativeImportExtensions` when emitting
+JavaScript. See `tests/integration/tsconfig.json`.
 
-Set `DENO_SQLITE_PATH` to an absolute SQLite shared library path before running
-the tests or example. On macOS with Homebrew SQLite:
+The SQLite runtime configures integer reads and array rows per statement, then
+calls `get()`, `all()`, `values()`, or `run()`. For `node:sqlite`, it uses
+`setReadBigInts(true)`, `setReturnArrays(true)`, spread arguments, and optional
+statement `close()`. Bun 1.4.2 frees discarded `node:sqlite` handles through
+garbage collection. Connection settings stay unchanged; JSON stays text or
+bytes without driver parsing.
 
-```sh
-export DENO_SQLITE_PATH="$(brew --prefix sqlite)/lib/libsqlite3.dylib"
+### Built-in SQLite
+
+Select `node:sqlite` to use the [built-in SQLite driver](https://nodejs.org/api/sqlite.html)
+in Node or Bun. The driver is tested with Node 26.10 and Bun 1.4.2. It needs no
+SQLite package, import map, or external SQLite shared library. Add this SQL block
+to a config with the `typescript` plugin configured above:
+
+```yaml
+sql:
+  - engine: sqlite
+    schema: schema.sql
+    queries: query.sql
+    codegen:
+      - plugin: typescript
+        out: db
+        options:
+          runtime: node # or bun
+          driver: node:sqlite
 ```
 
-On other platforms, use the installed `.so` or `.dll` path. Runtime calls need
-`--allow-env=DENO_SQLITE_PATH --allow-ffi`; the example also needs read access
-to its schema. The package does not download a native library.
+Pass a `DatabaseSync` instance to generated queries:
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { getAuthor } from "./db/query_sql.ts";
+import { clearStatementCache } from "./db/runtime_sqlite.ts";
+
+const database = new DatabaseSync("app.sqlite");
+try {
+  const author = getAuthor(database, { id: 1n });
+  console.log(author);
+} finally {
+  try {
+    clearStatementCache(database);
+  } finally {
+    database.close();
+  }
+}
+```
+
+Queries run synchronously in both SQLite type modes. Node and Bun TypeScript projects
+need `@types/node` with `node:sqlite` declarations.
+The generator does not add a transaction helper; use SQL transactions and
+savepoints in application code. Driver defaults, including double-quoted string
+literal handling, remain unchanged.
+
+### Bun SQLite
+
+Use `runtime: bun` with `driver: bun:sqlite` to pass a native Bun `Database`:
+
+```yaml
+options:
+  runtime: bun
+  driver: bun:sqlite
+```
+
+```ts
+import { Database } from "bun:sqlite";
+import { getAuthor } from "./db/query_sql.ts";
+import { clearStatementCache } from "./db/runtime_sqlite.ts";
+
+using database = new Database("app.sqlite");
+try {
+  const author = getAuthor(database, { id: 1n });
+  console.log(author);
+} finally {
+  clearStatementCache(database);
+}
+```
+
+Tested with Bun 1.4.2. Install `@types/bun` for TypeScript checking; no runtime
+package is needed. Both SQLite type modes run synchronously. Statements use
+`safeIntegers(true)` without changing connection defaults, preserve column
+positions through `values()`, and finalize on eviction, errors, or cache clear.
+`:one` reads the full result and returns its first row. Use `LIMIT 1` on selects
+that could return many rows. Missing results follow `emit_null_as_undefined`.
+Generated queries can run inside Bun's `database.transaction()` callbacks.
+Clear the cache before closing; queries reject closed connections even after
+`close(false)`, which otherwise leaves prepared Bun statements usable.
 
 ## Generated API
 
@@ -188,32 +243,30 @@ handle; the generated code does not open or close connections.
 | `:one`        | Row or `null`; server drivers require exactly one row, SQLite returns the first                                                                                           |
 | `:many`       | Row array; no matches returns `[]`                                                                                                                                        |
 | `:exec`       | `void`                                                                                                                                                                    |
-| `:execlastid` | MySQL: `number`, `number \| string`, or `string` according to big-number options; Deno SQLite: `number` in driver mode, `bigint` in native mode; better-sqlite3: `bigint` |
+| `:execlastid` | MySQL: `number`, `number \| string`, or `string` according to big-number options; SQLite: `bigint` |
 | `:execrows`   | `bigint` count                                                                                                                                                            |
 | `:execresult` | `{ rowsAffected: bigint; lastInsertId: bigint \| null }`; PostgreSQL insert ID is `null`                                                                                  |
 
-Functions return promises except `@bonakodo/sqlite` functions, which run
-synchronously. Native SQLite mode also makes better-sqlite3 functions
-synchronous, so both can run inside synchronous transaction callbacks.
+All SQLite functions run synchronously and can run inside synchronous
+transactions. PostgreSQL and MySQL functions return promises.
 PostgreSQL rejects `:execlastid`; use `INSERT ... RETURNING` with `:one`. The
 older better-sqlite3 generator rejected `:execlastid`; this plugin adds it with
 a `bigint` result. Unsupported annotations produce errors.
 
-The SQLite drivers use positional rows and checked conversions. Deno statements
-use a bounded statement cache; better-sqlite3 owns statement disposal. Integer
-reads use per-statement settings without changing the connection. MySQL uses its
-promise `execute()` API to bind values safely, including SQL text containing
-`?`. PostgreSQL keeps repeated parameters in one bind slot so server type
-inference stays consistent. Compiler-marked SQLite/MySQL slices expand at
+The SQLite drivers use positional rows and checked conversions. `node:sqlite` and `bun:sqlite` use a bounded statement cache; better-sqlite3 owns statement
+disposal. Integer reads use per-statement settings without changing the
+connection. MySQL uses its promise `execute()` API to bind values safely,
+including SQL text containing `?`. PostgreSQL keeps repeated parameters in one
+bind slot so server type inference stays consistent. Compiler-marked SQLite/MySQL slices expand at
 runtime; empty slices emit `NULL`. PostgreSQL arrays bind as one parameter; use
 `ANY($1)` for array membership. PostgreSQL `sqlc.slice` produces a generation
 error with this guidance instead of emitting a query that fails at runtime.
 
 ### Statement reuse
 
-`@bonakodo/sqlite` keeps up to **16 statements per connection**, shared by query
-files through their generated `runtime_sqlite.ts`. Set the limit on each actual
-`Database` instance; use zero for workloads with little SQL reuse:
+`node:sqlite` and `bun:sqlite` keep up to **16 statements per connection**,
+shared by query files through their generated `runtime_sqlite.ts`. Set the limit
+on each actual database instance; use zero for workloads with little SQL reuse:
 
 ```ts
 import { configureStatementCache, clearStatementCache } from "./db/runtime_sqlite.ts";
@@ -231,30 +284,34 @@ try {
 ```
 
 The cache uses weak connection keys, exact SQL and row mode, and LRU eviction.
-It configures integer and row settings once per prepared statement. Values and
-results never enter cache keys or retained entries; the driver resets statements
-and clears transient bindings before returning. Slices share this same limit,
-so each distinct expanded SQL consumes an entry. The limit counts statements,
-not bytes: long SQL and many placeholders can use more native memory.
+It configures integer and row settings once per prepared statement. Cache keys
+contain no values; the runtime retains statement handles, not argument or result
+arrays. These drivers reset statements after execution. `node:sqlite` and
+`bun:sqlite` can retain the last
+bound values within a statement until its next execution or release. Slices
+share this same limit, so each distinct expanded SQL consumes an entry. The limit
+counts statements, not bytes: long SQL and large bound values can use more native
+memory. On Bun 1.4.2, discarded `node:sqlite` handles await garbage collection, so the
+limit bounds retained cache entries rather than all live native handles.
 
 Arguments validate before acquisition. Each call owns its statement through
 execution, conversion, and cleanup. Nested calls use separate temporary
-statements when the matching entry is active or every slot is active; they
-finalize at call exit. The cache never waits, grows its retained entry count
+statements when the matching entry is active or every slot is active; it
+releases them at call exit. The cache never waits, grows its retained entry count
 under pressure, or retries failed SQL. Execution, reset, and conversion errors
 discard the statement. Cleanup errors propagate with the existing `finally`
 precedence. Clearing tries all idle statements and throws the first cleanup
-error. A driver-rejected disposal stays tracked for a later clear; active
-statements finalize when their calls finish. Lowering a limit
+error. A driver-rejected disposal stays tracked for a later clear; it releases
+active statements when their calls finish. Lowering a limit
 keeps active handles until their calls finish, then trims to the new limit.
 
 Clear before connection close or application-controlled changes that invalidate
 statements. Clearing after close is also safe: the driver's `close()` already
 finalizes its native handles. A later query uses the driver's closed-connection
-error; a new `Database` receives its own cache. SQLite's prepare-v2 schema rebuild
-handles ordinary schema changes. There is no automatic replay after a stale
-handle or schema error. Commit and rollback do not clear the cache. The cache
-owns only statements it prepares and never touches caller-owned iterators.
+error; a new database instance receives its own cache. SQLite's prepare-v2 schema
+rebuild handles ordinary schema changes. There is no automatic replay after a
+stale handle or schema error. Commit and rollback do not clear the cache. The
+cache owns only statements it prepares and never touches caller-owned iterators.
 Separate generated outputs each have their own runtime; reuse one output when
 query modules must share the limit. Workers and processes have separate handles.
 
@@ -295,9 +352,8 @@ handle supplied by your driver when it differs from the main connection.
 
 | Option                       | Default  | Effect                                                                                                      |
 | ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `runtime`                    | `node`   | `node`, `bun`, or `deno`                                                                                    |
+| `runtime`                    | `node`   | `node` or `bun`                                                                                    |
 | `driver`                     | required | Driver from the table above                                                                                 |
-| `sqlite_type_mode`           | `driver` | Older plugin types, or `native` value conversions                                                           |
 | `types_only`                 | `false`  | Models, query types, and enum value arrays; no SQL, functions, codecs, or runtime module                    |
 | `emit_null_as_undefined`     | `false`  | Absent rows and nullable results use `undefined`; nullable args may be omitted                              |
 | `optional_nullable_args`     | unset    | Controls nullable argument optionality independently; unset preserves `emit_null_as_undefined` behavior     |
@@ -338,37 +394,29 @@ for signed IDs. This applies to `:execlastid` and `:execresult`; it does not
 change database column types or driver connection settings. Use separate codegen
 blocks when tables need different insert-ID policies.
 
-`sqlite_type_mode: driver` keeps the older SQLite value rules with corrected
-text types:
+All SQLite drivers use the same value types:
 
-| Declared SQLite type | @bonakodo/sqlite   | better-sqlite3 |
-| -------------------- | ------------------ | -------------- |
-| Integer              | `number \| bigint` | `number`       |
-| NUMERIC/DECIMAL      | `number \| bigint` | `any`          |
-| REAL/float           | `number`           | `number`       |
-| Boolean              | `number`           | `boolean`      |
-| Date/time            | `string`           | `Date`         |
-| BLOB                 | `Uint8Array`       | `Buffer`       |
-| Text                 | `string`           | `string`       |
+| Declared SQLite type | TypeScript type |
+| -------------------- | --------------- |
+| Integer              | `bigint`        |
+| REAL/NUMERIC/DECIMAL  | `number`        |
+| Boolean              | `boolean`       |
+| Date/time            | `Date`          |
+| BLOB and JSON        | `Uint8Array`    |
+| Text                 | `string`        |
+| Unknown              | `unknown`       |
 
-For the Deno driver, generated statements read integers as `bigint`, then driver
-mode returns safe integers as `number` and larger integers as `bigint`. Native
-mode keeps every integer as `bigint`.
+Generated statements read integers as `bigint`, preserving signed 64-bit values.
+REAL/NUMERIC values must be finite. JSON remains raw UTF-8/SQLite bytes. Dates use
+UTC when stored text has no zone and keep millisecond precision. Numeric
+timestamps need a codec. Codecs control their own storage format.
 
-The better-sqlite3 wrappers now actually convert booleans/dates and map
-snake_case columns to the emitted camelCase properties. Other unknown SQLite
-types remain `any` in driver mode. Missing rows and nullable values keep their
-configured null policy. `number` integer and insert-ID APIs retain their usual
-JavaScript precision limits; use native SQLite mode for exact signed 64-bit
-data.
-
-`sqlite_type_mode: native` uses the migrated native value contract for either
-SQLite driver: integers are `bigint`, booleans are `boolean`, dates are `Date`,
-REAL/NUMERIC values are finite `number`, blobs are `Uint8Array`, and JSON
-remains raw UTF-8/SQLite bytes. Dates use UTC when stored text has no zone and
-keep millisecond precision. Numeric timestamps need a codec. Codecs control
-their own storage representation. Unknown SQLite types use `unknown` in native
-mode.
+The `sqlite_type_mode` option has been removed. Delete it from existing configs;
+both `native` and `driver` now fail as unknown options. Code that used the old
+`driver` default must use bigint integer arguments/results and insert IDs,
+boolean values, `Date` values, and `Uint8Array` blobs. Better-sqlite3 helpers now
+run synchronously. To use numbers for selected integer fields, choose the
+`safe_integer` codec preset; it rejects values outside the safe integer range.
 
 ### Enums
 
@@ -438,9 +486,8 @@ remain null.
 
 ```yaml
 options:
-  runtime: deno
-  driver: "@bonakodo/sqlite"
-  sqlite_type_mode: native
+  runtime: node
+  driver: "node:sqlite"
   overrides:
     - column: documents.id
       ts_type: DocumentID
@@ -463,13 +510,12 @@ rebase for nested query modules. The emitter validates type expressions and
 escapes SQL, comments, property names, and module specifiers.
 
 Use named mappings and `columns` to share conversions. Built-in presets require
-SQLite native mode and do not infer storage formats from column names:
+SQLite and do not infer storage formats from column names:
 
 ```yaml
 options:
-  runtime: deno
-  driver: "@bonakodo/sqlite"
-  sqlite_type_mode: native
+  runtime: node
+  driver: "node:sqlite"
   optional_nullable_args: true
   emit_query_factory: true
   type_mappings:
@@ -561,9 +607,8 @@ sql:
       - plugin: typescript
         out: db
         options:
-          runtime: deno
-          driver: "@bonakodo/sqlite"
-          sqlite_type_mode: native
+          runtime: node
+          driver: "node:sqlite"
           emitLemmaScript: true
 ```
 
@@ -704,8 +749,8 @@ fields use `string`, and parsed server JSON uses `JsonValue` in place of `any`.
 MySQL callers that enable big-number support must handle string insert IDs.
 
 From the native sqlc branch, move `gen.typescript.out` to `codegen.out` and the
-remaining settings to `codegen.options`. Set `runtime: deno`,
-`driver: @bonakodo/sqlite`, and `sqlite_type_mode: native` explicitly. Configure
+remaining settings to `codegen.options`. Set `runtime: node`,
+`driver: node:sqlite` explicitly. Configure
 the output path in `codegen.out`. No modified sqlc binary is needed.
 
 The plugin consumes the analysis sqlc sends. It cannot add compiler features
@@ -730,29 +775,30 @@ Work records must also fit the unused input region.
 ## Development
 
 ```sh
-deno task tools        # install pinned assembler and optimizer
-deno task build        # assemble and optimize the plugin
-deno task check        # formatting, lint, types, build, and tests
-deno task test         # Deno.test component, full-plugin, and adversarial suites
-deno task integration # stock sqlc plus generated-code checks and runtime tests
-deno task runtime      # build and test WASM-generated TypeScript support
-deno task live         # PostgreSQL/MySQL tests after integration
+npm ci
+npm run tools        # install pinned assembler and optimizer
+npm run build        # assemble and optimize the plugin
+npm run check        # formatting, lint, types, build, and tests
+npm run test         # node:test component, full-plugin, and adversarial suites
+npm run integration  # stock sqlc plus generated-code checks and runtime tests
+npm run runtime      # build and test WASM-generated TypeScript support
+npm run live         # PostgreSQL/MySQL tests after integration
 ```
 
-Tests use `Deno.test` and checked-in reference fixtures. The WASM suites check
+Tests use `node:test` and checked-in reference fixtures. The WASM suites check
 both direct assembly and optimized modules, parser boundaries, naming, types,
 SQL bindings, driver output, and exact protobuf responses. The
 [adversarial suite](tests/wasm/adversarial_test.ts) covers NUL bytes, malformed
 Unicode, oversized requests, mutation cases, and WASI I/O faults. Workers let
 the runner stop a module that loops forever.
 
-The integration suite needs stock sqlc, Node, npm, Deno, and the WASM build
+The integration suite needs stock sqlc, Node.js 26, npm, and the WASM build
 tools. Install the pinned sqlc binary without a compiler:
 
 ```sh
 tools/setup-sqlc.sh
 export PATH="$PWD/bin/.tools/sqlc-1.31.1:$PATH"
-deno task integration
+npm run integration
 ```
 
 The installer supports macOS and Linux on arm64 and amd64, verifies the official
@@ -761,34 +807,29 @@ accept `SQLC=/absolute/path/to/sqlc`.
 
 Integration checks real sqlc output for supported drivers and options, checks
 generated TypeScript against pinned package declarations, and runs queries under
-Deno, Node, and Bun. Test dependencies, including Bun and TypeScript, live in
-`tests/integration/package.json` and its lockfile. They take no part in the
-plugin build. See [integration tests](tests/integration/README.md).
+Node and Bun. The root `package.json` and `package-lock.json` pin tooling
+and test dependencies, including Bun and TypeScript. See [integration tests](tests/integration/README.md).
 
-`deno task live` uses dedicated PostgreSQL and MySQL test databases and creates
+`npm run live` uses dedicated PostgreSQL and MySQL test databases and creates
 and drops fixture tables. Set `SQLC_LIVE_PG_URL` and `SQLC_LIVE_MYSQL_URL`, or
 use the local `sqlc_test` defaults in `tests/integration/server_live_test.ts`.
 The script starts no database services. CI supplies PostgreSQL 17 and MySQL 8.4
-and checks JSON, arrays, geometry, binding, CRUD, transactions, and BIGINT. The
-[Deno SQLite example](examples/deno-sqlite/README.md) also regenerates and runs
-in CI.
+and checks JSON, arrays, geometry, binding, CRUD, transactions, and BIGINT.
 
 | Directory            | Contents                                                            |
 | -------------------- | ------------------------------------------------------------------- |
 | `src/`               | WAT modules, constant strings, Unicode and inflection tables        |
 | `src/templates/`     | Common and engine runtimes, JSON types, and codec errors            |
 | `tools/`             | Pinned tool setup, assembly, data packing, and test commands        |
-| `tests/wasm/`        | Deno component and full-plugin tests, fixtures, and WASI host       |
-| `tests/tools/`       | Tests for Deno data encoders and packers                            |
+| `tests/wasm/`        | Node component and full-plugin tests, fixtures, and WASI host       |
+| `tests/tools/`       | Tests for Node data encoders and packers                            |
 | `tests/runtime/`     | Tests for generated TypeScript support code                         |
-| `tests/integration/` | Stock-sqlc and Node/Bun/Deno checks, test dependencies              |
+| `tests/integration/` | Stock-sqlc and Node/Bun checks              |
 | `tests/fixtures/`    | SQL fixtures and stock-sqlc metadata                                |
-| `examples/`          | Applications using the released or locally built WASI plugin        |
 | `bin/`               | Ignored build output and local tools                                |
 
 To publish a release, push a new `v*` tag, such as `v1.2.3`. The workflow
-checks, builds, and tests the WASM, then checks generated example files with
-stock sqlc. It publishes `sqlc-gen-typescript-native.wasm`, its `.wasm.sha256`
+checks, builds, and tests the WASM, then checks generation with stock sqlc. It publishes `sqlc-gen-typescript-native.wasm`, its `.wasm.sha256`
 file, and release notes with a pinned config. Tags containing a hyphen, such as
 `v1.2.3-rc.1`, produce prereleases. Use a new tag for each release so published
 URLs and checksums stay valid.

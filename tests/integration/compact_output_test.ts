@@ -1,3 +1,6 @@
+import { tsc, typecheckArgs } from "./generation_helpers.ts";
+import { test } from "node:test";
+import { writeFile, rm, mkdir } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { join } from "node:path";
@@ -7,7 +10,6 @@ import {
   generate,
   type Options,
   output,
-  root,
   run,
 } from "./generation_helpers.ts";
 
@@ -19,10 +21,10 @@ async function load(directory: string, filename: string): Promise<Queries> {
 }
 
 async function prepare(directory: string) {
-  await Deno.remove(directory, { recursive: true }).catch((error) => {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  await rm(directory, { recursive: true }).catch((error) => {
+    if (!((error as NodeJS.ErrnoException).code === "ENOENT")) throw error;
   });
-  await Deno.mkdir(join(directory, "queries"), { recursive: true });
+  await mkdir(join(directory, "queries"), { recursive: true });
 }
 
 async function fixture(
@@ -33,46 +35,45 @@ async function fixture(
 ) {
   const directory = join(output, name);
   await prepare(directory);
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "schema.sql"),
     "CREATE TABLE entries (value INTEGER NOT NULL, notes TEXT);",
   );
   const query = (name: string, command = ":one") =>
     `-- name: ${name} ${command}\nSELECT value, notes FROM entries WHERE value = sqlc.arg('value');\n`;
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/same.sql"),
     query("ReadFirst") + query("ReadSecond") + query("ReadMany", ":many"),
   );
-  await Deno.writeTextFile(
-    join(directory, "queries/other.sql"),
-    query("ReadOther"),
-  );
+  await writeFile(join(directory, "queries/other.sql"), query("ReadOther"));
   if (engine === "sqlite") {
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "queries/overrides.sql"),
       query("ReadBoolean") + query("ReadNullable") + query("ReadRequired"),
     );
     for (const name of ["a", "b"]) {
-      await Deno.writeTextFile(
+      await writeFile(
         join(directory, `queries/codec_${name}.sql`),
         query(name === "a" ? "ReadCodecA" : "ReadCodecB"),
       );
-      await Deno.writeTextFile(
+      await writeFile(
         join(directory, `codec_${name}.ts`),
         `export const codec = {\n  encode(value: string): bigint { return BigInt(value); },\n  decode(value: unknown): string { return "${name}:" + String(value); }\n};\n`,
       );
     }
   }
-  await generate(directory, [{
-    engine,
-    schema: "schema.sql",
-    queries: "queries",
-    codegen: ["wasm", "raw"].map((plugin) => ({
-      plugin,
-      out: plugin,
-      options: { runtime: "deno", driver, ...extra },
-    })),
-  }]);
+  await generate(directory, [
+    {
+      engine,
+      schema: "schema.sql",
+      queries: "queries",
+      codegen: ["wasm", "raw"].map((plugin) => ({
+        plugin,
+        out: plugin,
+        options: { runtime: "node", driver, ...extra },
+      })),
+    },
+  ]);
   return { directory, generated: await compareBuilds(directory) };
 }
 
@@ -108,25 +109,23 @@ function assertRuntime(
   }
   assert(!("runtime.ts" in generated));
   const source = Object.values(generated).join("\n");
-  for (
-    const unused of [
-      "parseArrayText",
-      "encodeArray",
-      "decodeArray",
-      "mysqlInsertId",
-      "lastInsertId",
-      ...(externalCodecs ? [] : ["checkedJson"]),
-    ]
-  ) assert(!source.includes(unused), `unused runtime feature: ${unused}`);
+  for (const unused of [
+    "parseArrayText",
+    "encodeArray",
+    "decodeArray",
+    "mysqlInsertId",
+    "lastInsertId",
+    ...(externalCodecs ? [] : ["checkedJson"]),
+  ])
+    assert(!source.includes(unused), `unused runtime feature: ${unused}`);
 }
 
-Deno.test("shared SQLite decoders preserve query context and per-query overrides", async () => {
+test("shared SQLite decoders preserve query context and per-query overrides", async () => {
   const { directory, generated } = await fixture(
     "compact-sqlite",
     "sqlite",
-    "@bonakodo/sqlite",
+    "node:sqlite",
     {
-      sqlite_type_mode: "native",
       query_overrides: [
         { query: "ReadBoolean", column: "value", preset: "sqlite_boolean" },
         { query: "ReadNullable", column: "value", nullable: true },
@@ -156,21 +155,22 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
   let disposed = 0;
   const bindings: unknown[][] = [];
   const database = {
+    isOpen: true,
     prepare() {
       return {
-        safeIntegers() {},
-        raw() {
+        setReadBigInts() {},
+        setReturnArrays() {
           return this;
         },
-        get(values: unknown[]) {
+        get(...values: unknown[]) {
           bindings.push(values);
           return row;
         },
-        all(values: unknown[]) {
+        all(...values: unknown[]) {
           bindings.push(values);
           return row ? [row] : [];
         },
-        [Symbol.dispose]() {
+        close() {
           disposed++;
         },
       };
@@ -189,10 +189,12 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
     );
     assert.deepEqual(result, { value: 1n, notes: null });
   }
-  assert.deepEqual(same.readMany!(database, args), [{
-    value: 1n,
-    notes: null,
-  }]);
+  assert.deepEqual(same.readMany!(database, args), [
+    {
+      value: 1n,
+      notes: null,
+    },
+  ]);
   assert.deepEqual(overrides.readBoolean!(database, args), {
     value: true,
     notes: null,
@@ -200,7 +202,10 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
   assert.equal(disposed, 3, "query files share one connection limit");
   clearStatementCache(database);
   assert.equal(disposed, 5);
-  assert.deepEqual(bindings, Array.from({ length: 5 }, () => [1n]));
+  assert.deepEqual(
+    bindings,
+    Array.from({ length: 5 }, () => [1n]),
+  );
   assert.deepEqual(codecA.readCodecA!(database, args), {
     value: "a:1",
     notes: null,
@@ -216,13 +221,11 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
   );
   assert.equal(disposed, 7, "invalid arguments must fail before preparing SQL");
   row = ["private-invalid-value", null];
-  for (
-    const [query, name, file] of [
-      [same.readFirst!, "ReadFirst", "same.sql"],
-      [same.readSecond!, "ReadSecond", "same.sql"],
-      [other.readOther!, "ReadOther", "other.sql"],
-    ] as const
-  ) {
+  for (const [query, name, file] of [
+    [same.readFirst!, "ReadFirst", "same.sql"],
+    [same.readSecond!, "ReadSecond", "same.sql"],
+    [other.readOther!, "ReadOther", "other.sql"],
+  ] as const) {
     assert.throws(
       () => query(database, args),
       codecError(name, file, "value", "bigint", "decode"),
@@ -249,9 +252,9 @@ Deno.test("shared SQLite decoders preserve query context and per-query overrides
   clearStatementCache(database);
 });
 
-Deno.test("shared server decoders keep async calls and omit unused engine features", async (t) => {
+test("shared server decoders keep async calls and omit unused engine features", async (t) => {
   for (const driver of ["pg", "postgres", "mysql2"]) {
-    await t.step(driver, async () => {
+    await t.test(driver, async () => {
       const engine = driver === "mysql2" ? "mysql" : "postgresql";
       const { directory, generated } = await fixture(
         `compact-${driver}`,
@@ -263,30 +266,33 @@ Deno.test("shared server decoders keep async calls and omit unused engine featur
       const other = await load(directory, "other_sql.ts");
       let rows: unknown[][] = [[7, null]];
       const calls: unknown[] = [];
-      const database = driver === "pg"
-        ? {
-          query(config: unknown) {
-            calls.push(config);
-            return Promise.resolve({ rows, rowCount: rows.length });
-          },
-        }
-        : driver === "postgres"
-        ? {
-          unsafe(sql: string, values: unknown[]) {
-            calls.push({ sql, values });
-            return { values: () => Promise.resolve(rows) };
-          },
-        }
-        : {
-          execute(config: unknown) {
-            calls.push(config);
-            return Promise.resolve([rows, []]);
-          },
-        };
+      const database =
+        driver === "pg"
+          ? {
+              query(config: unknown) {
+                calls.push(config);
+                return Promise.resolve({ rows, rowCount: rows.length });
+              },
+            }
+          : driver === "postgres"
+            ? {
+                unsafe(sql: string, values: unknown[]) {
+                  calls.push({ sql, values });
+                  return { values: () => Promise.resolve(rows) };
+                },
+              }
+            : {
+                execute(config: unknown) {
+                  calls.push(config);
+                  return Promise.resolve([rows, []]);
+                },
+              };
       const args = { value: 7 };
-      for (
-        const query of [same.readFirst!, same.readSecond!, other.readOther!]
-      ) {
+      for (const query of [
+        same.readFirst!,
+        same.readSecond!,
+        other.readOther!,
+      ]) {
         const pending = query(database, args);
         assert(
           pending instanceof Promise,
@@ -294,19 +300,19 @@ Deno.test("shared server decoders keep async calls and omit unused engine featur
         );
         assert.deepEqual(await pending, { value: 7, notes: null });
       }
-      assert.deepEqual(await same.readMany!(database, args), [{
-        value: 7,
-        notes: null,
-      }]);
+      assert.deepEqual(await same.readMany!(database, args), [
+        {
+          value: 7,
+          notes: null,
+        },
+      ]);
       assert.equal(calls.length, 4);
       rows = [["private-invalid-value", null]];
-      for (
-        const [query, name, file] of [
-          [same.readFirst!, "ReadFirst", "same.sql"],
-          [same.readSecond!, "ReadSecond", "same.sql"],
-          [other.readOther!, "ReadOther", "other.sql"],
-        ] as const
-      ) {
+      for (const [query, name, file] of [
+        [same.readFirst!, "ReadFirst", "same.sql"],
+        [same.readSecond!, "ReadSecond", "same.sql"],
+        [other.readOther!, "ReadOther", "other.sql"],
+      ] as const) {
         await assert.rejects(
           () => query(database, args) as Promise<unknown>,
           codecError(name, file, "value", "number", "decode"),
@@ -331,36 +337,33 @@ Deno.test("shared server decoders keep async calls and omit unused engine featur
   }
 });
 
-Deno.test("800 queries share one row decoder across files within a source-size budget", async () => {
+test("800 queries share one row decoder across files within a source-size budget", async () => {
   const directory = join(output, "compact-large-schema");
   await prepare(directory);
   let schema = "";
   for (let table = 0; table < 100; table++) {
     const suffix = String(table).padStart(3, "0");
     const name = `entries_${suffix}`;
-    schema +=
-      `CREATE TABLE ${name} (id BIGINT PRIMARY KEY, name TEXT NOT NULL, active BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL, notes TEXT);\n`;
+    schema += `CREATE TABLE ${name} (id BIGINT PRIMARY KEY, name TEXT NOT NULL, active BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL, notes TEXT);\n`;
     let queries = "";
     for (let query = 0; query < 8; query++) {
-      queries +=
-        `-- name: ReadEntry${suffix}Page${query} :many\nSELECT * FROM ${name} WHERE id > sqlc.arg('after_id') AND active = sqlc.arg('active') ORDER BY id LIMIT sqlc.arg('limit');\n\n`;
+      queries += `-- name: ReadEntry${suffix}Page${query} :many\nSELECT * FROM ${name} WHERE id > sqlc.arg('after_id') AND active = sqlc.arg('active') ORDER BY id LIMIT sqlc.arg('limit');\n\n`;
     }
-    await Deno.writeTextFile(
-      join(directory, "queries", `${name}.sql`),
-      queries,
-    );
+    await writeFile(join(directory, "queries", `${name}.sql`), queries);
   }
-  await Deno.writeTextFile(join(directory, "schema.sql"), schema);
-  await generate(directory, [{
-    engine: "postgresql",
-    schema: "schema.sql",
-    queries: "queries",
-    codegen: ["wasm", "raw"].map((plugin) => ({
-      plugin,
-      out: plugin,
-      options: { runtime: "node", driver: "pg" },
-    })),
-  }]);
+  await writeFile(join(directory, "schema.sql"), schema);
+  await generate(directory, [
+    {
+      engine: "postgresql",
+      schema: "schema.sql",
+      queries: "queries",
+      codegen: ["wasm", "raw"].map((plugin) => ({
+        plugin,
+        out: plugin,
+        options: { runtime: "node", driver: "pg" },
+      })),
+    },
+  ]);
   const generated = await compareBuilds(directory);
   const sources = Object.values(generated);
   const size = sources.reduce(
@@ -370,10 +373,11 @@ Deno.test("800 queries share one row decoder across files within a source-size b
   // The same stock-sqlc fixture produced 1,922,028 bytes before sharing.
   assert(size <= 700_000, `generated ${size} bytes; budget is 700,000`);
   const queryCode = Object.entries(generated)
-    .filter(([name]) =>
-      !name.startsWith("runtime_") && name !== "codec_error.ts"
+    .filter(
+      ([name]) => !name.startsWith("runtime_") && name !== "codec_error.ts",
     )
-    .map(([, source]) => source).join("\n");
+    .map(([, source]) => source)
+    .join("\n");
   assert.equal(
     queryCode.match(/export async function readEntry\d+Page\d+\(/g)?.length,
     800,
@@ -381,98 +385,110 @@ Deno.test("800 queries share one row decoder across files within a source-size b
   // A shared decoder reads the five fields once, regardless of query or file.
   // Do not tie this check to private function names or import aliases.
   for (let column = 0; column < 5; column++) {
-    const reads = queryCode.match(new RegExp(`\\brow\\[${column}\\]`, "g")) ??
-      [];
+    const reads =
+      queryCode.match(new RegExp(`\\brow\\[${column}\\]`, "g")) ?? [];
     assert.equal(reads.length, 1, `column ${column} repeats its row decoder`);
   }
   assertRuntime(generated, "postgresql");
 });
 
-Deno.test("queries without arguments emit only their command's runtime needs", async (t) => {
+test("queries without arguments emit only their command's runtime needs", async (t) => {
   const modules: string[] = [];
-  for (const driver of ["@bonakodo/sqlite", "pg", "postgres", "mysql2"]) {
-    const engine = driver === "@bonakodo/sqlite"
-      ? "sqlite"
-      : driver === "mysql2"
-      ? "mysql"
-      : "postgresql";
-    const commands = engine === "postgresql"
-      ? ["exec", "execrows", "execresult"]
-      : ["exec", "execrows", "execresult", "execlastid"];
+  for (const driver of ["node:sqlite", "pg", "postgres", "mysql2"]) {
+    const engine =
+      driver === "node:sqlite"
+        ? "sqlite"
+        : driver === "mysql2"
+          ? "mysql"
+          : "postgresql";
+    const commands =
+      engine === "postgresql"
+        ? ["exec", "execrows", "execresult"]
+        : ["exec", "execrows", "execresult", "execlastid"];
     for (const command of commands) {
-      await t.step(`${driver} :${command}`, async () => {
-        const name = driver === "@bonakodo/sqlite" ? "sqlite" : driver;
+      await t.test(`${driver} :${command}`, async () => {
+        const name = driver === "node:sqlite" ? "sqlite" : driver;
         const directory = join(output, `compact-noargs-${name}-${command}`);
         await prepare(directory);
-        await Deno.writeTextFile(
+        await writeFile(
           join(directory, "schema.sql"),
           "CREATE TABLE entries (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);",
         );
-        await Deno.writeTextFile(
+        await writeFile(
           join(directory, "query.sql"),
           `-- name: StoreValue :${command}\nINSERT INTO entries (id, value) VALUES (7, 2);\n`,
         );
-        await generate(directory, [{
-          engine,
-          schema: "schema.sql",
-          queries: "query.sql",
-          codegen: ["wasm", "raw"].map((plugin) => ({
-            plugin,
-            out: plugin,
-            options: {
-              runtime: "deno",
-              driver,
-              ...(engine === "sqlite" ? { sqlite_type_mode: "native" } : {}),
-            },
-          })),
-        }]);
+        await generate(directory, [
+          {
+            engine,
+            schema: "schema.sql",
+            queries: "query.sql",
+            codegen: ["wasm", "raw"].map((plugin) => ({
+              plugin,
+              out: plugin,
+              options: {
+                runtime: "node",
+                driver,
+              },
+            })),
+          },
+        ]);
         await compareBuilds(directory);
         modules.push(join(directory, "wasm/index.ts"));
         const queries = await load(directory, "query_sql.ts");
         let count: unknown = 2;
         let insertId: unknown = 7;
-        const database = engine === "sqlite"
-          ? {
-            prepare() {
-              return {
-                safeIntegers() {},
-                raw() {
-                  return this;
+        const database =
+          engine === "sqlite"
+            ? {
+                isOpen: true,
+                prepare() {
+                  return {
+                    setReadBigInts() {},
+                    setReturnArrays() {
+                      return this;
+                    },
+                    get: () => [insertId],
+                    run: () => ({ changes: count, lastInsertRowid: insertId }),
+                    close() {},
+                  };
                 },
-                get: () => [insertId],
-                run: () => ({ changes: count, lastInsertRowid: insertId }),
-                [Symbol.dispose]() {},
-              };
-            },
-          }
-          : driver === "pg"
-          ? { query: () => Promise.resolve({ rows: [], rowCount: count }) }
-          : driver === "postgres"
-          ? {
-            unsafe: () => ({
-              values: () => Promise.resolve(Object.assign([], { count })),
-            }),
-          }
-          : {
-            execute: () =>
-              Promise.resolve([{
-                affectedRows: count,
-                insertId,
-              }, []]),
-          };
+              }
+            : driver === "pg"
+              ? { query: () => Promise.resolve({ rows: [], rowCount: count }) }
+              : driver === "postgres"
+                ? {
+                    unsafe: () => ({
+                      values: () =>
+                        Promise.resolve(Object.assign([], { count })),
+                    }),
+                  }
+                : {
+                    execute: () =>
+                      Promise.resolve([
+                        {
+                          affectedRows: count,
+                          insertId,
+                        },
+                        [],
+                      ]),
+                  };
         const pending = queries.storeValue!(database);
         assert.equal(pending instanceof Promise, engine !== "sqlite");
         const result = await pending;
-        const expected = command === "exec"
-          ? undefined
-          : command === "execrows"
-          ? 2n
-          : command === "execlastid"
-          ? engine === "mysql" ? 7 : 7n
-          : {
-            rowsAffected: 2n,
-            lastInsertId: engine === "postgresql" ? null : 7n,
-          };
+        const expected =
+          command === "exec"
+            ? undefined
+            : command === "execrows"
+              ? 2n
+              : command === "execlastid"
+                ? engine === "mysql"
+                  ? 7
+                  : 7n
+                : {
+                    rowsAffected: 2n,
+                    lastInsertId: engine === "postgresql" ? null : 7n,
+                  };
         assert.deepEqual(result, expected);
         if (command === "exec") return;
         if (command === "execlastid") insertId = "private-invalid-value";
@@ -497,17 +513,12 @@ Deno.test("queries without arguments emit only their command's runtime needs", a
   }
   // Each command was generated alone, so an unused query context or a missing
   // metadata helper cannot be hidden by another query's imports.
-  await run(Deno.execPath(), [
-    "check",
-    "--config",
-    join(root, "tests/integration/deno.json"),
-    ...modules,
-  ]);
+  await run(process.execPath, [tsc, ...typecheckArgs, ...modules]);
 });
 
-Deno.test("explicit generated runtime codec paths retain the selected preset", async (t) => {
+test("explicit generated runtime codec paths retain the selected preset", async (t) => {
   for (const path of ["./runtime_sqlite.ts", "./runtime.ts"]) {
-    await t.step(path, async () => {
+    await t.test(path, async () => {
       const directory = join(
         output,
         path === "./runtime.ts"
@@ -515,11 +526,11 @@ Deno.test("explicit generated runtime codec paths retain the selected preset", a
           : "compact-codec-engine-path",
       );
       await prepare(directory);
-      await Deno.writeTextFile(
+      await writeFile(
         join(directory, "schema.sql"),
         "CREATE TABLE entries (value INTEGER NOT NULL);",
       );
-      await Deno.writeTextFile(
+      await writeFile(
         join(directory, "query.sql"),
         "-- name: ReadValue :one\nSELECT value FROM entries WHERE value = sqlc.arg('value');\n",
       );
@@ -527,25 +538,29 @@ Deno.test("explicit generated runtime codec paths retain the selected preset", a
         ts_type: "number",
         codec: { path, name: "safeInteger" },
       };
-      await generate(directory, [{
-        engine: "sqlite",
-        schema: "schema.sql",
-        queries: "query.sql",
-        codegen: ["wasm", "raw"].map((plugin) => ({
-          plugin,
-          out: plugin,
-          options: {
-            runtime: "deno",
-            driver: "@bonakodo/sqlite",
-            sqlite_type_mode: "native",
-            query_overrides: [{
-              query: "ReadValue",
-              column: "value",
-              ...mapping,
-            }, { query: "ReadValue", parameter: "value", ...mapping }],
-          },
-        })),
-      }]);
+      await generate(directory, [
+        {
+          engine: "sqlite",
+          schema: "schema.sql",
+          queries: "query.sql",
+          codegen: ["wasm", "raw"].map((plugin) => ({
+            plugin,
+            out: plugin,
+            options: {
+              runtime: "node",
+              driver: "node:sqlite",
+              query_overrides: [
+                {
+                  query: "ReadValue",
+                  column: "value",
+                  ...mapping,
+                },
+                { query: "ReadValue", parameter: "value", ...mapping },
+              ],
+            },
+          })),
+        },
+      ]);
       const generated = await compareBuilds(directory);
       assert(
         generated["runtime_sqlite.ts"]!.includes("export const safeInteger"),
@@ -555,22 +570,23 @@ Deno.test("explicit generated runtime codec paths retain the selected preset", a
       }
       assert(
         Object.values(generated).some((source) =>
-          source.includes('from "./runtime_sqlite.ts"')
+          source.includes('from "./runtime_sqlite.ts"'),
         ),
       );
       const bindings: unknown[][] = [];
       const database = {
+        isOpen: true,
         prepare() {
           return {
-            safeIntegers() {},
-            raw() {
+            setReadBigInts() {},
+            setReturnArrays() {
               return this;
             },
-            get(values: unknown[]) {
+            get(...values: unknown[]) {
               bindings.push(values);
               return [17n];
             },
-            [Symbol.dispose]() {},
+            close() {},
           };
         },
       };
@@ -587,18 +603,18 @@ Deno.test("explicit generated runtime codec paths retain the selected preset", a
   }
 });
 
-Deno.test("external SQLite codecs can use the generated JSON codec factory", async () => {
+test("external SQLite codecs can use the generated JSON codec factory", async () => {
   const directory = join(output, "compact-external-json-codec");
   await prepare(directory);
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "schema.sql"),
     "CREATE TABLE entries (value TEXT NOT NULL);",
   );
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "query.sql"),
     "-- name: ReadValue :one\nSELECT value FROM entries WHERE value = sqlc.arg('value');\n",
   );
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "codec.ts"),
     `import { createJsonTextCodec } from "./wasm/runtime_sqlite.ts";
 export const codec = createJsonTextCodec((value: unknown): string => {
@@ -611,50 +627,54 @@ export const codec = createJsonTextCodec((value: unknown): string => {
     ts_type: "string",
     codec: { path: "../codec.ts", name: "codec" },
   };
-  await generate(directory, [{
-    engine: "sqlite",
-    schema: "schema.sql",
-    queries: "query.sql",
-    codegen: ["wasm", "raw"].map((plugin) => ({
-      plugin,
-      out: plugin,
-      options: {
-        runtime: "deno",
-        driver: "@bonakodo/sqlite",
-        sqlite_type_mode: "native",
-        query_overrides: [{ query: "ReadValue", column: "value", ...mapping }, {
-          query: "ReadValue",
-          parameter: "value",
-          ...mapping,
-        }],
-      },
-    })),
-  }]);
+  await generate(directory, [
+    {
+      engine: "sqlite",
+      schema: "schema.sql",
+      queries: "query.sql",
+      codegen: ["wasm", "raw"].map((plugin) => ({
+        plugin,
+        out: plugin,
+        options: {
+          runtime: "node",
+          driver: "node:sqlite",
+          query_overrides: [
+            { query: "ReadValue", column: "value", ...mapping },
+            {
+              query: "ReadValue",
+              parameter: "value",
+              ...mapping,
+            },
+          ],
+        },
+      })),
+    },
+  ]);
   const generated = await compareBuilds(directory);
   const runtime = generated["runtime_sqlite.ts"]!;
-  for (
-    const name of [
-      "safeInteger",
-      "epochMilliseconds",
-      "sqliteBoolean",
-      "jsonText",
-      "createJsonTextCodec",
-    ]
-  ) assert(runtime.includes(name), name);
+  for (const name of [
+    "safeInteger",
+    "epochMilliseconds",
+    "sqliteBoolean",
+    "jsonText",
+    "createJsonTextCodec",
+  ])
+    assert(runtime.includes(name), name);
   assert(!runtime.includes("lastInsertId"));
   const bindings: unknown[][] = [];
   const database = {
+    isOpen: true,
     prepare() {
       return {
-        safeIntegers() {},
-        raw() {
+        setReadBigInts() {},
+        setReturnArrays() {
           return this;
         },
-        get(values: unknown[]) {
+        get(...values: unknown[]) {
           bindings.push(values);
           return ['"stored"'];
         },
-        [Symbol.dispose]() {},
+        close() {},
       };
     },
   };
@@ -669,27 +689,29 @@ export const codec = createJsonTextCodec((value: unknown): string => {
   );
 });
 
-Deno.test("postgres raw arrays preserve scalar parser and array field error context", async () => {
+test("postgres raw arrays preserve scalar parser and array field error context", async () => {
   const directory = join(output, "compact-postgres-raw-context");
   await prepare(directory);
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "schema.sql"),
     "CREATE TABLE entries (id INTEGER NOT NULL, labels TEXT[] NOT NULL, count INTEGER NOT NULL);",
   );
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/entries.sql"),
     "-- name: ReadEntries :many\nSELECT id, labels, count FROM entries;\n",
   );
-  await generate(directory, [{
-    engine: "postgresql",
-    schema: "schema.sql",
-    queries: "queries",
-    codegen: ["wasm", "raw"].map((plugin) => ({
-      plugin,
-      out: plugin,
-      options: { runtime: "deno", driver: "postgres" },
-    })),
-  }]);
+  await generate(directory, [
+    {
+      engine: "postgresql",
+      schema: "schema.sql",
+      queries: "queries",
+      codegen: ["wasm", "raw"].map((plugin) => ({
+        plugin,
+        out: plugin,
+        options: { runtime: "node", driver: "postgres" },
+      })),
+    },
+  ]);
   await compareBuilds(directory);
   const queries = await load(directory, "entries_sql.ts");
   const secret = "private-invalid-value";
@@ -697,12 +719,12 @@ Deno.test("postgres raw arrays preserve scalar parser and array field error cont
   let failure: number | undefined;
   let values = ["7", '{"one","two"}', "3"];
   const database = {
+    isOpen: true,
     unsafe() {
       return {
         raw: () =>
-          Promise.resolve(Object.assign(
-            [values.map((value) => Buffer.from(value))],
-            {
+          Promise.resolve(
+            Object.assign([values.map((value) => Buffer.from(value))], {
               columns: values.map((_, index) => ({
                 parser(text: string) {
                   if (index === failure) throw cause;
@@ -714,24 +736,33 @@ Deno.test("postgres raw arrays preserve scalar parser and array field error cont
                   return Number(text);
                 },
               })),
-            },
-          )),
+            }),
+          ),
       };
     },
   };
-  assert.deepEqual(await queries.readEntries!(database), [{
-    id: 7,
-    labels: ["one", "two"],
-    count: 3,
-  }]);
-  for (const [index, field] of [[0, "id"], [2, "count"]] as const) {
+  assert.deepEqual(await queries.readEntries!(database), [
+    {
+      id: 7,
+      labels: ["one", "two"],
+      count: 3,
+    },
+  ]);
+  for (const [index, field] of [
+    [0, "id"],
+    [2, "count"],
+  ] as const) {
     failure = index;
     await assert.rejects(
       () => queries.readEntries!(database) as Promise<unknown>,
       (error: unknown) => {
-        codecError("ReadEntries", "entries.sql", field, "number", "decode")(
-          error,
-        );
+        codecError(
+          "ReadEntries",
+          "entries.sql",
+          field,
+          "number",
+          "decode",
+        )(error);
         const details = error as TypeError & { originalCause(): unknown };
         assert.equal(details.originalCause(), cause);
         return true;

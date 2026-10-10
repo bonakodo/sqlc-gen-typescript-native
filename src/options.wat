@@ -14,7 +14,6 @@
 (global $opt_driver (mut i32) (i32.const 0))
 (global $opt_driver_ptr (mut i32) (i32.const 0))
 (global $opt_driver_len (mut i32) (i32.const 0))
-(global $opt_mode_native (mut i32) (i32.const 0))
 (global $opt_types_only (mut i32) (i32.const 0))
 (global $opt_null_undefined (mut i32) (i32.const 0))
 (global $opt_optional_args (mut i32) (i32.const 0))
@@ -142,19 +141,18 @@
 (global $opt_shape_ranges i32 (i32.const 2624512))
 (global $opt_shape_fields i32 (i32.const 2624536))
 (data (i32.const 2624512)
-  "\00\00\38\00" ;; Options
-  "\38\00\0c\00" ;; MySQL2Options
-  "\4c\00\28\00" ;; Override
-  "\4c\00\10\00" ;; TypeMapping
-  "\74\00\24\00" ;; QueryOverride
-  "\44\00\08\00" ;; Import/Codec
+  "\00\00\34\00" ;; Options
+  "\34\00\0c\00" ;; MySQL2Options
+  "\48\00\28\00" ;; Override
+  "\48\00\10\00" ;; TypeMapping
+  "\70\00\24\00" ;; QueryOverride
+  "\40\00\08\00" ;; Import/Codec
 )
 (data (i32.const 2624536)
   ;; Options
   "\00\00\03\01" ;; out, shape 1
   "\03\00\07\01" ;; runtime, shape 1
   "\0a\00\06\01" ;; driver, shape 1
-  "\10\00\10\01" ;; sqlite_type_mode, shape 1
   "\20\00\06\04" ;; mysql2, shape 4
   "\26\00\0a\02" ;; types_only, shape 2
   "\30\00\16\02" ;; emit_null_as_undefined, shape 2
@@ -437,6 +435,15 @@
   (local.set $n (call $json_len (local.get $token)))
   (global.set $opt_driver_ptr (local.get $p))
   (global.set $opt_driver_len (local.get $n))
+  ;; Built-in modules have no package prefix or version selector.
+  (if (call $eq (local.get $p) (local.get $n) (i32.const 2624768) (i32.const 11))
+    (then
+      (global.set $opt_driver (i32.const 6)) (return)))
+  (if (call $eq (local.get $p) (local.get $n) (i32.const 2624784) (i32.const 10))
+    (then
+      (if (i32.ne (global.get $opt_runtime) (i32.const 2))
+        (then (call $opt_error (i32.const 2624992) (i32.const 32))))
+      (global.set $opt_driver (i32.const 7)) (return)))
   (if (i32.ge_u (local.get $n) (i32.const 4))
     (then
       (if (call $eq (local.get $p) (i32.const 4) (i32.const 2622041) (i32.const 4))
@@ -466,13 +473,10 @@
   (if (call $eq (local.get $p) (local.get $basen) (i32.const 2622059) (i32.const 8)) (then (global.set $opt_driver (i32.const 2))))
   (if (call $eq (local.get $p) (local.get $basen) (i32.const 2621472) (i32.const 6)) (then (global.set $opt_driver (i32.const 3))))
   (if (call $eq (local.get $p) (local.get $basen) (i32.const 2622067) (i32.const 14)) (then (global.set $opt_driver (i32.const 4))))
-  (if (call $eq (local.get $p) (local.get $basen) (i32.const 2622081) (i32.const 16)) (then (global.set $opt_driver (i32.const 5))))
   (if (i32.or (i32.eqz (global.get $opt_driver))
         (i32.or
           (i32.and (local.get $promise) (i32.ne (global.get $opt_driver) (i32.const 3)))
-          (i32.or
-            (i32.and (i32.eq (local.get $prefix) (i32.const 2)) (i32.ne (global.get $opt_driver) (i32.const 5)))
-            (i32.and (i32.eq (local.get $prefix) (i32.const 1)) (i32.eq (global.get $opt_driver) (i32.const 5))))))
+          (i32.eq (local.get $prefix) (i32.const 2))))
     (then (call $opt_error_quote (i32.const 2622097) (i32.const 19) (local.get $token))))
   (if (local.get $version)
     (then
@@ -486,21 +490,17 @@
           (if (i32.eqz (call $opt_version_char (local.get $c)))
             (then (call $opt_error_quote (i32.const 2622097) (i32.const 19) (local.get $token))))
           (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $version_byte)))))
-  (if (i32.and (local.get $version)
-        (i32.and (i32.ne (global.get $opt_runtime) (i32.const 3)) (i32.ne (global.get $opt_driver) (i32.const 5))))
-    (then
-      (if (i32.eq (global.get $opt_runtime) (i32.const 2))
-        (then (call $opt_error (i32.const 2622116) (i32.const 87)))
-        (else (call $opt_error (i32.const 2622203) (i32.const 88))))))
-  (if (i32.and (i32.eq (global.get $opt_driver) (i32.const 5)) (i32.ne (global.get $opt_runtime) (i32.const 3)))
-    (then (call $opt_error (i32.const 2622291) (i32.const 39)))))
+  (if (local.get $version)
+    (then (call $opt_error (i32.const 2622116) (i32.const 51)))))
 
 (func $opt_driver_name (result i32 i32)
+  (if (i32.eq (global.get $opt_driver) (i32.const 7)) (then (return (i32.const 2624784) (i32.const 10))))
+  (if (i32.eq (global.get $opt_driver) (i32.const 6)) (then (return (i32.const 2624768) (i32.const 11))))
   (if (i32.eq (global.get $opt_driver) (i32.const 1)) (then (return (i32.const 2622057) (i32.const 2))))
   (if (i32.eq (global.get $opt_driver) (i32.const 2)) (then (return (i32.const 2622059) (i32.const 8))))
   (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then (return (i32.const 2621472) (i32.const 6))))
   (if (i32.eq (global.get $opt_driver) (i32.const 4)) (then (return (i32.const 2622067) (i32.const 14))))
-  (i32.const 2622081) (i32.const 16))
+  unreachable)
 
 (func $opt_driver_specifier (result i32 i32)
   (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then (return (i32.const 2622330) (i32.const 14))))
@@ -577,9 +577,7 @@
       (if (call $opt_present_object (local.get $obj) (i32.const 2621686) (i32.const 5))
         (then (call $opt_error (i32.const 2622612) (i32.const 32))))
       (if (i32.lt_u (global.get $opt_driver) (i32.const 4))
-        (then (call $opt_error (i32.const 2622644) (i32.const 37))))
-      (if (i32.eqz (global.get $opt_mode_native))
-        (then (call $opt_error (i32.const 2622681) (i32.const 46))))))
+        (then (call $opt_error (i32.const 2622644) (i32.const 37))))))
   (if (i32.and (i32.eqz (call $opt_nonblank (local.get $obj) (i32.const 2621667) (i32.const 7)))
         (i32.eqz (call $opt_nonempty (local.get $obj) (i32.const 2621674) (i32.const 6))))
     (then (call $opt_error (i32.const 2622727) (i32.const 26))))
@@ -767,7 +765,6 @@
   (global.set $opt_root (i32.const -1))
   (global.set $opt_runtime (i32.const 1))
   (global.set $opt_driver (i32.const 0))
-  (global.set $opt_mode_native (i32.const 0))
   (global.set $opt_types_only (i32.const 0))
   (global.set $opt_null_undefined (i32.const 0))
   (global.set $opt_optional_args (i32.const 0))
@@ -791,15 +788,7 @@
   (global.set $opt_root (local.get $obj))
   (call $opt_prefix (i32.const 2623007) (i32.const 12))
   (if (i32.eqz (call $opt_nonempty (local.get $obj) (i32.const 2621450) (i32.const 6)))
-    (then (call $opt_error (i32.const 2623393) (i32.const 81))))
-  (local.set $v (call $opt_get (local.get $obj) (i32.const 2621456) (i32.const 16)))
-  (if (call $opt_nonempty (local.get $obj) (i32.const 2621456) (i32.const 16))
-    (then
-      (if (call $json_eq (local.get $v) (i32.const 2623474) (i32.const 6))
-        (then (global.set $opt_mode_native (i32.const 1)))
-        (else
-          (if (i32.eqz (call $json_eq (local.get $v) (i32.const 2621450) (i32.const 6)))
-            (then (call $opt_qerror_tail (i32.const 2623480) (i32.const 29) (local.get $v) (i32.const 2623509) (i32.const 22))))))))
+    (then (call $opt_error (i32.const 2624832) (i32.const 88))))
   (local.set $v (call $opt_get (local.get $obj) (i32.const 2621443) (i32.const 7)))
   (if (call $opt_nonempty (local.get $obj) (i32.const 2621443) (i32.const 7))
     (then
@@ -807,9 +796,7 @@
         (br_if $runtime_done (call $json_eq (local.get $v) (i32.const 2623531) (i32.const 4)))
         (if (call $json_eq (local.get $v) (i32.const 2623535) (i32.const 3))
           (then (global.set $opt_runtime (i32.const 2)) (br $runtime_done)))
-        (if (call $json_eq (local.get $v) (i32.const 2623538) (i32.const 4))
-          (then (global.set $opt_runtime (i32.const 3)) (br $runtime_done)))
-        (call $opt_qerror_tail (i32.const 2623542) (i32.const 20) (local.get $v) (i32.const 2623562) (i32.const 24)))))
+        (call $opt_qerror_tail (i32.const 2623542) (i32.const 20) (local.get $v) (i32.const 2623562) (i32.const 17)))))
   (call $opt_driver_parse (call $opt_get (local.get $obj) (i32.const 2621450) (i32.const 6)))
   (global.set $opt_types_only (call $opt_bool (local.get $obj) (i32.const 2621478) (i32.const 10)))
   (global.set $opt_null_undefined (call $opt_bool (local.get $obj) (i32.const 2621488) (i32.const 22)))
@@ -1020,7 +1007,6 @@
 (data (i32.const 2621440) "\6f\75\74") ;; 'out'
 (data (i32.const 2621443) "\72\75\6e\74\69\6d\65") ;; 'runtime'
 (data (i32.const 2621450) "\64\72\69\76\65\72") ;; 'driver'
-(data (i32.const 2621456) "\73\71\6c\69\74\65\5f\74\79\70\65\5f\6d\6f\64\65") ;; 'sqlite_type_mode'
 (data (i32.const 2621472) "\6d\79\73\71\6c\32") ;; 'mysql2'
 (data (i32.const 2621478) "\74\79\70\65\73\5f\6f\6e\6c\79") ;; 'types_only'
 (data (i32.const 2621488) "\65\6d\69\74\5f\6e\75\6c\6c\5f\61\73\5f\75\6e\64\65\66\69\6e\65\64") ;; 'emit_null_as_undefined'
@@ -1076,11 +1062,8 @@
 (data (i32.const 2622057) "\70\67") ;; 'pg'
 (data (i32.const 2622059) "\70\6f\73\74\67\72\65\73") ;; 'postgres'
 (data (i32.const 2622067) "\62\65\74\74\65\72\2d\73\71\6c\69\74\65\33") ;; 'better-sqlite3'
-(data (i32.const 2622081) "\40\62\6f\6e\61\6b\6f\64\6f\2f\73\71\6c\69\74\65") ;; '@bonakodo/sqlite'
 (data (i32.const 2622097) "\75\6e\73\75\70\70\6f\72\74\65\64\20\64\72\69\76\65\72\20") ;; 'unsupported driver '
-(data (i32.const 2622116) "\64\72\69\76\65\72\20\76\65\72\73\69\6f\6e\20\73\65\6c\65\63\74\6f\72\73\20\72\65\71\75\69\72\65\20\72\75\6e\74\69\6d\65\3a\20\64\65\6e\6f\3b\20\70\69\6e\20\74\68\65\20\70\61\63\6b\61\67\65\20\69\6e\20\70\61\63\6b\61\67\65\2e\6a\73\6f\6e\20\66\6f\72\20\62\75\6e") ;; 'driver version selectors require runtime: deno; pin the package in package.json for bun'
-(data (i32.const 2622203) "\64\72\69\76\65\72\20\76\65\72\73\69\6f\6e\20\73\65\6c\65\63\74\6f\72\73\20\72\65\71\75\69\72\65\20\72\75\6e\74\69\6d\65\3a\20\64\65\6e\6f\3b\20\70\69\6e\20\74\68\65\20\70\61\63\6b\61\67\65\20\69\6e\20\70\61\63\6b\61\67\65\2e\6a\73\6f\6e\20\66\6f\72\20\6e\6f\64\65") ;; 'driver version selectors require runtime: deno; pin the package in package.json for node'
-(data (i32.const 2622291) "\40\62\6f\6e\61\6b\6f\64\6f\2f\73\71\6c\69\74\65\20\72\65\71\75\69\72\65\73\20\72\75\6e\74\69\6d\65\3a\20\64\65\6e\6f") ;; '@bonakodo/sqlite requires runtime: deno'
+(data (i32.const 2622116) "pin driver versions in package.json for Node or Bun")
 (data (i32.const 2622330) "\6d\79\73\71\6c\32\2f\70\72\6f\6d\69\73\65") ;; 'mysql2/promise'
 (data (i32.const 2622344) "\6d\61\70\70\69\6e\67\20\63\61\6e\6e\6f\74\20\63\6f\6d\62\69\6e\65\20\77\69\74\68\20\74\73\5f\74\79\70\65\2c\20\69\6d\70\6f\72\74\2c\20\63\6f\64\65\63\2c\20\6f\72\20\70\72\65\73\65\74") ;; 'mapping cannot combine with ts_type, import, codec, or preset'
 (data (i32.const 2622405) "\75\6e\6b\6e\6f\77\6e\20\74\79\70\65\20\6d\61\70\70\69\6e\67\20") ;; 'unknown type mapping '
@@ -1105,7 +1088,6 @@
 (data (i32.const 2622601) "\2c\20\72\65\63\65\69\76\65\64\20") ;; ', received '
 (data (i32.const 2622612) "\70\72\65\73\65\74\20\63\61\6e\6e\6f\74\20\63\6f\6d\62\69\6e\65\20\77\69\74\68\20\63\6f\64\65\63") ;; 'preset cannot combine with codec'
 (data (i32.const 2622644) "\63\6f\64\65\63\20\70\72\65\73\65\74\73\20\72\65\71\75\69\72\65\20\61\20\53\51\4c\69\74\65\20\64\72\69\76\65\72") ;; 'codec presets require a SQLite driver'
-(data (i32.const 2622681) "\63\6f\64\65\63\20\70\72\65\73\65\74\73\20\72\65\71\75\69\72\65\20\73\71\6c\69\74\65\5f\74\79\70\65\5f\6d\6f\64\65\3a\20\6e\61\74\69\76\65") ;; 'codec presets require sqlite_type_mode: native'
 (data (i32.const 2622727) "\72\65\71\75\69\72\65\73\20\74\73\5f\74\79\70\65\20\6f\72\20\70\72\65\73\65\74") ;; 'requires ts_type or preset'
 (data (i32.const 2622753) "\69\6d\70\6f\72\74\20\72\65\71\75\69\72\65\73\20\74\73\5f\74\79\70\65") ;; 'import requires ts_type'
 (data (i32.const 2622776) "\69\6d\70\6f\72\74\20\72\65\71\75\69\72\65\73\20\70\61\74\68\20\61\6e\64\20\6e\61\6d\65") ;; 'import requires path and name'
@@ -1127,15 +1109,10 @@
 (data (i32.const 2623226) "\6d\75\73\74\20\73\70\65\63\69\66\79\20\65\78\61\63\74\6c\79\20\6f\6e\65\20\6f\66\20\63\6f\6c\75\6d\6e\2c\20\63\6f\6c\75\6d\6e\73\2c\20\6f\72\20\64\62\5f\74\79\70\65") ;; 'must specify exactly one of column, columns, or db_type'
 (data (i32.const 2623281) "\6e\75\6c\6c\61\62\6c\65\5f\61\6c\6c\20\72\65\71\75\69\72\65\73\20\64\62\5f\74\79\70\65\20\61\6e\64\20\63\61\6e\6e\6f\74\20\63\6f\6d\62\69\6e\65\20\77\69\74\68\20\6e\75\6c\6c\61\62\6c\65\3a\20\74\72\75\65") ;; 'nullable_all requires db_type and cannot combine with nullable: true'
 (data (i32.const 2623349) "\74\79\70\65\73\63\72\69\70\74\20\6f\70\74\69\6f\6e\73\3a\20\65\78\70\65\63\74\65\64\20\6f\6e\65\20\4a\53\4f\4e\20\6f\62\6a\65\63\74") ;; 'typescript options: expected one JSON object'
-(data (i32.const 2623393) "\64\72\69\76\65\72\20\69\73\20\72\65\71\75\69\72\65\64\3b\20\75\73\65\20\70\67\2c\20\70\6f\73\74\67\72\65\73\2c\20\6d\79\73\71\6c\32\2c\20\62\65\74\74\65\72\2d\73\71\6c\69\74\65\33\2c\20\6f\72\20\40\62\6f\6e\61\6b\6f\64\6f\2f\73\71\6c\69\74\65") ;; 'driver is required; use pg, postgres, mysql2, better-sqlite3, or @bonakodo/sqlite'
-(data (i32.const 2623474) "\6e\61\74\69\76\65") ;; 'native'
-(data (i32.const 2623480) "\75\6e\73\75\70\70\6f\72\74\65\64\20\73\71\6c\69\74\65\5f\74\79\70\65\5f\6d\6f\64\65\20") ;; 'unsupported sqlite_type_mode '
-(data (i32.const 2623509) "\3b\20\75\73\65\20\64\72\69\76\65\72\20\6f\72\20\6e\61\74\69\76\65") ;; '; use driver or native'
 (data (i32.const 2623531) "\6e\6f\64\65") ;; 'node'
 (data (i32.const 2623535) "\62\75\6e") ;; 'bun'
-(data (i32.const 2623538) "\64\65\6e\6f") ;; 'deno'
 (data (i32.const 2623542) "\75\6e\73\75\70\70\6f\72\74\65\64\20\72\75\6e\74\69\6d\65\20") ;; 'unsupported runtime '
-(data (i32.const 2623562) "\3b\20\75\73\65\20\6e\6f\64\65\2c\20\62\75\6e\2c\20\6f\72\20\64\65\6e\6f") ;; '; use node, bun, or deno'
+(data (i32.const 2623562) "; use node or bun")
 (data (i32.const 2623586) "\70\6f\73\74\67\72\65\73\71\6c") ;; 'postgresql'
 (data (i32.const 2623596) "\6d\79\73\71\6c") ;; 'mysql'
 (data (i32.const 2623601) "\73\71\6c\69\74\65") ;; 'sqlite'
@@ -1165,3 +1142,9 @@
 (data (i32.const 2624238) "\61\66\74\65\72\20\6f\62\6a\65\63\74\20\6b\65\79\3a\76\61\6c\75\65\20\70\61\69\72") ;; 'after object key:value pair'
 (data (i32.const 2624265) "\61\66\74\65\72\20\61\72\72\61\79\20\65\6c\65\6d\65\6e\74") ;; 'after array element'
 (data (i32.const 2624284) "emitLemmaScript")
+
+(data (i32.const 2624768) "node:sqlite")
+(data (i32.const 2624784) "bun:sqlite")
+(data (i32.const 2624832) "driver is required; use pg, postgres, mysql2, better-sqlite3, node:sqlite, or bun:sqlite")
+
+(data (i32.const 2624992) "bun:sqlite requires runtime: bun")

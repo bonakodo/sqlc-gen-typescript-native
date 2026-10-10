@@ -1,16 +1,21 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import type { Options } from "./fixture_types.ts";
 import { Buffer } from "node:buffer";
 import {
   command,
   errorMessage,
   type Json,
+  migrateDriverDiagnostic,
   type Pair,
+  removedTarget,
   wabt,
 } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT options", async () => {
+test("WAT options", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     json_at: (a0: number, a1: number) => number;
@@ -28,7 +33,6 @@ Deno.test("WAT options", async () => {
     opt_factory: { value: number };
     opt_get: (a0: number, a1: number, a2: number) => number;
     opt_lemmascript: { value: number };
-    opt_mode_native: { value: number };
     opt_mysql_insert_unsigned: { value: number };
     opt_mysql_strings: { value: number };
     opt_mysql_support: { value: number };
@@ -44,13 +48,12 @@ Deno.test("WAT options", async () => {
     text_reset: (a0: number) => void;
   }
   // Compile handwritten WAT and compare against frozen options parser results.
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-options-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-options-"));
   let wasm;
   try {
     const fragments = await Promise.all(
       ["core", "unicode", "inflection-data", "text", "json", "options"].map(
-        (n) =>
-          Deno.readTextFile(new URL(`../../src/${n}.wat`, import.meta.url)),
+        (n) => readFile(new URL(`../../src/${n}.wat`, import.meta.url), "utf8"),
       ),
     );
     const funcs = [
@@ -75,7 +78,6 @@ Deno.test("WAT options", async () => {
       "opt_root",
       "opt_runtime",
       "opt_driver",
-      "opt_mode_native",
       "opt_types_only",
       "opt_null_undefined",
       "opt_optional_args",
@@ -88,21 +90,22 @@ Deno.test("WAT options", async () => {
     ];
     const source =
       '(module\n(import "test" "error" (func $error (param i32 i32)))\n' +
-      fragments.join("\n") + "\n" + funcs.map((n) =>
-        `(export "${n}" (func $${n}))`
-      ).join("\n") + "\n" + globals.map((n) =>
-        `(export "${n}" (global $${n}))`
-      ).join("\n") + "\n)";
-    await Deno.writeTextFile(join(directory, "test.wat"), source);
-    const compile = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+      fragments.join("\n") +
+      "\n" +
+      funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") +
+      "\n" +
+      globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") +
+      "\n)";
+    await writeFile(join(directory, "test.wat"), source);
+    const compile = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(compile.status, 0, compile.stderr);
-    wasm = await Deno.readFile(join(directory, "test.wasm"));
+    wasm = await readFile(join(directory, "test.wasm"));
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -159,15 +162,13 @@ Deno.test("WAT options", async () => {
   }
   function flags(o: Options) {
     return {
-      opt_runtime: { node: 1, bun: 2, deno: 3 }[o.runtime],
+      opt_runtime: { node: 1, bun: 2 }[o.runtime],
       opt_driver: {
         pg: 1,
         postgres: 2,
         mysql2: 3,
         "better-sqlite3": 4,
-        "@bonakodo/sqlite": 5,
       }[o._driver_name],
-      opt_mode_native: Number(o.sqlite_type_mode === "native"),
       opt_types_only: Number(Boolean(o.types_only)),
       opt_null_undefined: Number(Boolean(o.emit_null_as_undefined)),
       opt_optional_args: Number(
@@ -178,29 +179,53 @@ Deno.test("WAT options", async () => {
       opt_lemmascript: Number(Boolean(o.emitLemmaScript)),
       opt_mysql_support: Number(Boolean(o.mysql2?.support_big_numbers)),
       opt_mysql_strings: Number(Boolean(o.mysql2?.big_number_strings)),
-      opt_mysql_insert_unsigned: o.mysql2?.insert_id_unsigned == null
-        ? -1
-        : Number(o.mysql2.insert_id_unsigned),
+      opt_mysql_insert_unsigned:
+        o.mysql2?.insert_id_unsigned == null
+          ? -1
+          : Number(o.mysql2.insert_id_unsigned),
     };
   }
   const records = JSON.parse(
-    await Deno.readTextFile(
-      new URL("./fixtures/options.json", import.meta.url),
-    ),
+    await readFile(new URL("./fixtures/options.json", import.meta.url), "utf8"),
   ).cases;
   let passed = 0;
+  let retired = 0;
   const mismatch = [];
-  for (const r of records) {
+  for (const original of records) {
+    const r = { ...original };
+    // Retain the historical validation cases after removing valid old settings.
+    // Invalid settings now fail at the unknown-field check instead.
+    try {
+      const options = JSON.parse(r.input);
+      if (options && removedTarget(options)) {
+        retired++;
+        continue;
+      }
+      if (Object.hasOwn(options, "sqlite_type_mode")) {
+        if (["native", "driver"].includes(options.sqlite_type_mode)) {
+          delete options.sqlite_type_mode;
+          r.input = JSON.stringify(options);
+        } else {
+          r.error =
+            'typescript options: json: unknown field "sqlite_type_mode"';
+        }
+      }
+    } catch {
+      /* Keep malformed JSON cases byte-for-byte. */
+    }
+
     let root, error;
     try {
       root = parse(r.input);
     } catch (ex) {
       error = errorMessage(ex);
     }
-    if (error !== r.error) {
+    const expectedError =
+      r.error === undefined ? undefined : migrateDriverDiagnostic(r.error);
+    if (error !== expectedError) {
       mismatch.push({
         input: r.input,
-        want: r.error ?? "SUCCESS",
+        want: expectedError ?? "SUCCESS",
         got: error ?? "SUCCESS",
       });
       continue;
@@ -236,25 +261,137 @@ Deno.test("WAT options", async () => {
     } else passed++;
   }
   console.log(
-    `${passed}/${records.length} exact oracle checks passed; Wasm ${wasm.length} bytes`,
+    `${passed}/${
+      records.length - retired
+    } exact oracle checks passed; ${retired} retired target cases; Wasm ${wasm.length} bytes`,
   );
   for (const v of mismatch.slice(0, 30)) console.log(JSON.stringify(v));
   assert.equal(mismatch.length, 0, "option output/error oracle mismatches");
 
-  for (
-    const [fields, expected] of [
-      ['"emitLemmaScript": true', 1],
-      ['"emitLemmaScript": false', 0],
-      ['"emitLemmaScript": true', 1],
-      ["", 0],
-      ['"emitLemmaScript": null', 0],
-      ['"emitLemmaScript": true, "emitLemmaScript": null', 1],
-      ['"emitLemmaScript": true, "emitLemmaScript": false', 0],
-      ['"EMITLEMMASCRIPT": true', 1],
-      ['"emitlemmaſcript": true', 1],
-      ['"emitLemmaScript": true, "EMITLEMMASCRIPT": false', 0],
-    ] as const
-  ) {
+  for (const runtime of [undefined, "node", "bun"]) {
+    parse(JSON.stringify({ driver: "node:sqlite", runtime }));
+    assert.equal(e.opt_driver.value, 6);
+    assert.equal(e.opt_runtime.value, runtime === "bun" ? 2 : 1);
+    assert.equal(decode(...e.opt_driver_name()), "node:sqlite");
+    assert.equal(decode(...e.opt_driver_specifier()), "node:sqlite");
+    assert.doesNotThrow(() => e.opt_validate_engine(...key("sqlite")));
+    assert.throws(
+      () => e.opt_validate_engine(...key("postgresql")),
+      /node:sqlite requires engine: sqlite/,
+    );
+  }
+  for (const driver of [
+    "better-sqlite3",
+    "@bonakodo/sqlite",
+    "node:sqlite",
+    "bun:sqlite",
+    "pg",
+    "mysql2",
+  ]) {
+    for (const sqlite_type_mode of [
+      "native",
+      "driver",
+      "auto",
+      "",
+      null,
+      true,
+      1,
+      {},
+      [],
+    ]) {
+      assert.throws(
+        () =>
+          parse(JSON.stringify({ driver, runtime: "bun", sqlite_type_mode })),
+        /unknown field "sqlite_type_mode"/,
+      );
+    }
+  }
+  for (const driver of [
+    "pg",
+    "postgres",
+    "mysql2",
+    "better-sqlite3",
+    "node:sqlite",
+    "bun:sqlite",
+    "@bonakodo/sqlite",
+  ]) {
+    assert.throws(
+      () => parse(JSON.stringify({ driver, runtime: "deno" })),
+      /unsupported runtime "deno"; use node or bun/,
+    );
+  }
+  for (const runtime of ["node", "bun"]) {
+    for (const driver of [
+      "@bonakodo/sqlite",
+      "@bonakodo/sqlite@0.1.0",
+      "jsr:@bonakodo/sqlite@0.1.0",
+      "npm:@bonakodo/sqlite",
+      "npm:@jsr/bonakodo__sqlite",
+    ]) {
+      assert.throws(
+        () => parse(JSON.stringify({ driver, runtime })),
+        /unsupported driver/,
+      );
+    }
+  }
+  parse('{"driver":"bun:sqlite","runtime":"bun"}');
+  assert.equal(e.opt_driver.value, 7);
+  assert.equal(decode(...e.opt_driver_name()), "bun:sqlite");
+  assert.equal(decode(...e.opt_driver_specifier()), "bun:sqlite");
+  assert.doesNotThrow(() => e.opt_validate_engine(...key("sqlite")));
+  assert.throws(
+    () => e.opt_validate_engine(...key("mysql")),
+    /bun:sqlite requires engine: sqlite/,
+  );
+  for (const runtime of [undefined, "node"]) {
+    assert.throws(
+      () => parse(JSON.stringify({ driver: "bun:sqlite", runtime })),
+      /bun:sqlite requires runtime: bun/,
+    );
+  }
+  for (const driver of [
+    "bun:sqlite@1.4.2",
+    "npm:bun:sqlite",
+    "jsr:bun:sqlite",
+    "bun:sqlite/promise",
+    "bun:sqlite ",
+  ]) {
+    assert.throws(
+      () => parse(JSON.stringify({ driver, runtime: "bun" })),
+      /unsupported driver/,
+    );
+  }
+  for (const driver of [
+    "node:sqlite@26.10",
+    "npm:node:sqlite",
+    "jsr:node:sqlite",
+    "node:sqlite/promise",
+    "node:sqlite ",
+  ]) {
+    assert.throws(
+      () => parse(JSON.stringify({ driver, runtime: "node" })),
+      /unsupported driver/,
+    );
+  }
+  parse('{"driver":"pg"}');
+  assert.equal(
+    e.opt_driver.value,
+    1,
+    "node:sqlite must not leak into later parses",
+  );
+
+  for (const [fields, expected] of [
+    ['"emitLemmaScript": true', 1],
+    ['"emitLemmaScript": false', 0],
+    ['"emitLemmaScript": true', 1],
+    ["", 0],
+    ['"emitLemmaScript": null', 0],
+    ['"emitLemmaScript": true, "emitLemmaScript": null', 1],
+    ['"emitLemmaScript": true, "emitLemmaScript": false', 0],
+    ['"EMITLEMMASCRIPT": true', 1],
+    ['"emitlemmaſcript": true', 1],
+    ['"emitLemmaScript": true, "EMITLEMMASCRIPT": false', 0],
+  ] as const) {
     parse(`{"driver":"pg"${fields ? `,${fields}` : ""}}`);
     assert.equal(e.opt_lemmascript.value, expected, fields || "default/reset");
   }
@@ -376,23 +513,19 @@ Deno.test("WAT options", async () => {
       "{",
       '"\\',
     ];
-    for (
-      const s of invalid.filter((s) =>
-        !s.includes("ud800") && !s.includes("udc00")
-      )
-    ) assert.throws(() => parse(s), s);
+    for (const s of invalid.filter(
+      (s) => !s.includes("ud800") && !s.includes("udc00"),
+    ))
+      assert.throws(() => parse(s), s);
     for (const s of ['"\\ud800"', '"\\udc00"', '"\\ud800\\u0041"'] as const) {
       assert.equal(value(parse(s)), JSON.parse(s).toWellFormed());
     }
-    for (
-      const b of [[34, 0xff, 34], [34, 0xc0, 0x80, 34], [
-        34,
-        0xed,
-        0xa0,
-        0x80,
-        34,
-      ], [34, 0xf4, 0x90, 0x80, 0x80, 34]] as const
-    ) {
+    for (const b of [
+      [34, 0xff, 34],
+      [34, 0xc0, 0x80, 34],
+      [34, 0xed, 0xa0, 0x80, 34],
+      [34, 0xf4, 0x90, 0x80, 0x80, 34],
+    ] as const) {
       assert.equal(
         value(parse(Uint8Array.from(b))),
         new TextDecoder().decode(Uint8Array.from(b).slice(1, -1)),
@@ -401,7 +534,7 @@ Deno.test("WAT options", async () => {
     assert.doesNotThrow(() => parse("[".repeat(128) + "0" + "]".repeat(128)));
     assert.throws(() => parse("[".repeat(129) + "0" + "]".repeat(129)));
     assert.doesNotThrow(() =>
-      parse("[" + Array(16383).fill("0").join(",") + "]")
+      parse("[" + Array(16383).fill("0").join(",") + "]"),
     );
     assert.throws(() => parse("[" + Array(16384).fill("0").join(",") + "]"));
     assert.throws(() => exports.json_parse(1048576, 1));
@@ -457,16 +590,22 @@ Deno.test("WAT options", async () => {
       for (let j = rnd(5) + 1; j--;) {
         const i = rnd(s.length + 1);
         if (rnd(3) === 0) s = s.slice(0, i) + s.slice(i + 1);
-        else {s = s.slice(0, i) + alphabet[rnd(alphabet.length)] +
-            s.slice(i + Number(rnd(2)));}
+        else {
+          s =
+            s.slice(0, i) +
+            alphabet[rnd(alphabet.length)] +
+            s.slice(i + Number(rnd(2)));
+        }
       }
-      let expected, ok = true;
+      let expected,
+        ok = true;
       try {
         expected = JSON.parse(s);
       } catch {
         ok = false;
       }
-      let actual, accepted = true;
+      let actual,
+        accepted = true;
       try {
         actual = value(parse(s));
       } catch {
@@ -483,7 +622,8 @@ Deno.test("WAT options", async () => {
       mutations++;
     }
     console.log(
-      "PASS: " + mutations +
+      "PASS: " +
+        mutations +
         " mutated JSON documents match JSON.parse acceptance and values",
     );
   }

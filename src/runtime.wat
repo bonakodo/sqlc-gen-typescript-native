@@ -101,18 +101,18 @@
   (local $specifier i32) (local $specifier_n i32)
   (call $quote (call $opt_driver_specifier)) (local.set $specifier_n) (local.set $specifier)
   (if (i32.eq (global.get $opt_driver) (i32.const 1)) (then
-    (return (call $fmt2 (call $c_client_pg)
-      (if (result i32 i32) (i32.eq (global.get $opt_runtime) (i32.const 3)) (then (call $c_client_pg_deno)) (else (call $c_empty)))
+    (return (call $fmt1 (call $c_client_pg)
       (local.get $specifier) (local.get $specifier_n)))))
   (if (i32.eq (global.get $opt_driver) (i32.const 2)) (then
     (return (call $fmt1 (call $c_client_postgres) (local.get $specifier) (local.get $specifier_n)))))
   (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then
     (return (call $fmt1 (call $c_client_mysql) (local.get $specifier) (local.get $specifier_n)))))
   (if (i32.eq (global.get $opt_driver) (i32.const 4)) (then
-    (return (call $fmt2 (call $c_client_better)
-      (if (result i32 i32) (i32.eq (global.get $opt_runtime) (i32.const 3)) (then (call $c_client_better_deno)) (else (call $c_empty)))
+    (return (call $fmt1 (call $c_client_better)
       (local.get $specifier) (local.get $specifier_n)))))
-  (call $fmt1 (call $c_client_bonakodo) (local.get $specifier) (local.get $specifier_n)))
+  (if (i32.eq (global.get $opt_driver) (i32.const 6)) (then
+    (return (call $fmt1 (call $c_client_node_sqlite) (local.get $specifier) (local.get $specifier_n)))))
+  (call $fmt1 (call $c_client_bun_sqlite) (local.get $specifier) (local.get $specifier_n)))
 
 
 (func $emit_runtime_file (param $file i32)

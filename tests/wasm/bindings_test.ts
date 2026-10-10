@@ -1,9 +1,12 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
 import { command, type Pair, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT bindings", async () => {
+test("WAT bindings", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     engine: { value: number };
@@ -17,7 +20,7 @@ Deno.test("WAT bindings", async () => {
   }
   // Compare the bindings implementation with the frozen reference corpus.
   const corpusPath = new URL("./fixtures/bindings.json", import.meta.url);
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-binding-wat-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-binding-wat-"));
   let module: WebAssembly.Module;
   try {
     const fragments = await Promise.all(
@@ -30,10 +33,10 @@ Deno.test("WAT bindings", async () => {
         "state",
         "bindings",
       ].map((name) =>
-        Deno.readTextFile(new URL(`../../src/${name}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${name}.wat`, import.meta.url), "utf8"),
       ),
     );
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "test.wat"),
       `(module\n${fragments.join("\n")}
     (global $opt_types_only i32 (i32.const 0))(global $opt_factory i32 (i32.const 0))
@@ -45,21 +48,23 @@ Deno.test("WAT bindings", async () => {
     (export "errorp" (global $test_errorp))(export "errorn" (global $test_errorn))
   )`,
     );
-    const result = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+    const result = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(result.status, 0, result.stderr);
     module = await WebAssembly.compile(
-      await Deno.readFile(join(directory, "test.wasm")),
+      await readFile(join(directory, "test.wasm")),
     );
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
   class Exit extends Error {
-    constructor(readonly code: number) {
+    readonly code: number;
+    constructor(code: number) {
       super(`Exit ${code}`);
+      this.code = code;
     }
   }
   const instance = new WebAssembly.Instance(module, {
@@ -95,7 +100,7 @@ Deno.test("WAT bindings", async () => {
   };
   const get = (p: number, n: number) =>
     Buffer.from(mem.subarray(p, p + n)).toString("utf8");
-  const records = JSON.parse(await Deno.readTextFile(corpusPath));
+  const records = JSON.parse(await readFile(corpusPath, "utf8"));
   let failures = 0;
   for (const [i, c] of records.entries()) {
     api.work.value = 40000000;
@@ -163,11 +168,14 @@ Deno.test("WAT bindings", async () => {
     const text = get(load(plan + 64), load(plan + 68)),
       dynamic = Boolean(load(plan + 60));
     try {
-      assert.deepEqual({ parts, text, dynamic }, {
-        parts: c.Parts,
-        text: c.Text,
-        dynamic: c.Dynamic,
-      });
+      assert.deepEqual(
+        { parts, text, dynamic },
+        {
+          parts: c.Parts,
+          text: c.Text,
+          dynamic: c.Dynamic,
+        },
+      );
     } catch {
       failures++;
       if (failures <= 15) {

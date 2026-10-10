@@ -1,3 +1,4 @@
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
@@ -13,7 +14,6 @@ import {
 
 function ergonomicsOptions(): Options {
   return {
-    sqlite_type_mode: "native",
     emit_query_factory: true,
     optional_nullable_args: true,
     type_mappings: {
@@ -67,32 +67,27 @@ interface Case {
   extra?: Options;
 }
 const cases: Case[] = [];
-for (const runtime of ["node", "bun", "deno"]) {
+for (const runtime of ["node", "bun"]) {
   for (const driver of ["pg", "postgres", "mysql2", "better-sqlite3"]) {
-    const engine = driver === "mysql2"
-      ? "mysql"
-      : driver === "better-sqlite3"
-      ? "sqlite"
-      : "postgresql";
+    const engine =
+      driver === "mysql2"
+        ? "mysql"
+        : driver === "better-sqlite3"
+          ? "sqlite"
+          : "postgresql";
     cases.push({ name: `${runtime}-${driver}`, engine, runtime, driver });
   }
 }
 const jsonOverrides = {
-  overrides: [{
-    column: "records.document",
-    ts_type: "Document",
-    import: { path: "../../../json_domain.ts", name: "Document" },
-  }],
+  overrides: [
+    {
+      column: "records.document",
+      ts_type: "Document",
+      import: { path: "../../../json_domain.ts", name: "Document" },
+    },
+  ],
 };
 cases.push(
-  {
-    name: "ergonomics-db-sqlite",
-    engine: "sqlite",
-    runtime: "deno",
-    driver: "@bonakodo/sqlite",
-    fixture: "ergonomics",
-    extra: ergonomicsOptions(),
-  },
   {
     name: "ergonomics-better-sqlite3",
     engine: "sqlite",
@@ -100,6 +95,54 @@ cases.push(
     driver: "better-sqlite3",
     fixture: "ergonomics",
     extra: ergonomicsOptions(),
+  },
+  {
+    name: "ergonomics-node-sqlite",
+    engine: "sqlite",
+    runtime: "node",
+    driver: "node:sqlite",
+    fixture: "ergonomics",
+    extra: ergonomicsOptions(),
+  },
+  ...["node", "bun"].map((runtime) => ({
+    name: runtime === "node" ? "node-sqlite" : `${runtime}-node-sqlite`,
+    engine: "sqlite",
+    runtime,
+    driver: "node:sqlite",
+  })),
+  {
+    name: "bun-sqlite",
+    engine: "sqlite",
+    runtime: "bun",
+    driver: "bun:sqlite",
+  },
+  {
+    name: "bun-sqlite-undefined",
+    engine: "sqlite",
+    runtime: "bun",
+    driver: "bun:sqlite",
+    extra: {
+      emit_null_as_undefined: true,
+      optional_nullable_args: true,
+    },
+  },
+  {
+    name: "bun-sqlite-ergonomics",
+    engine: "sqlite",
+    runtime: "bun",
+    driver: "bun:sqlite",
+    fixture: "ergonomics",
+    extra: ergonomicsOptions(),
+  },
+  {
+    name: "undefined-node-sqlite",
+    engine: "sqlite",
+    runtime: "node",
+    driver: "node:sqlite",
+    extra: {
+      emit_null_as_undefined: true,
+      optional_nullable_args: true,
+    },
   },
   {
     name: "embed-pg",
@@ -131,41 +174,20 @@ cases.push(
     extra: { types_only: true },
   },
   {
-    name: "deno-db-sqlite",
-    engine: "sqlite",
-    runtime: "deno",
-    driver: "@bonakodo/sqlite",
-  },
-  {
-    name: "native-db-sqlite",
-    engine: "sqlite",
-    runtime: "deno",
-    driver: "@bonakodo/sqlite",
-    extra: { sqlite_type_mode: "native" },
-  },
-  {
-    name: "native-better-sqlite3",
-    engine: "sqlite",
-    runtime: "node",
-    driver: "better-sqlite3",
-    extra: { sqlite_type_mode: "native" },
-  },
-  {
     name: "undefined",
     engine: "sqlite",
-    runtime: "deno",
-    driver: "@bonakodo/sqlite",
+    runtime: "node",
+    driver: "node:sqlite",
     extra: {
       emit_null_as_undefined: true,
       emit_sql_as_const: false,
-      sqlite_type_mode: "native",
     },
   },
   {
     name: "types-only",
     engine: "sqlite",
-    runtime: "deno",
-    driver: "@bonakodo/sqlite",
+    runtime: "node",
+    driver: "node:sqlite",
     extra: { types_only: true },
   },
   {
@@ -198,21 +220,27 @@ cases.push(
   },
 );
 
-Deno.test("stock sqlc generates all driver and option fixtures", async (t) => {
+test("stock sqlc generates all driver and option fixtures", async (t) => {
   await run(sqlc, ["version"]);
   await generate(
     output,
     cases.map((tc) =>
-      block(tc.engine, tc.fixture ?? tc.engine, output, {
-        runtime: tc.runtime,
-        driver: tc.driver,
-        emit_query_factory: true,
-        ...tc.extra,
-      }, tc.name)
+      block(
+        tc.engine,
+        tc.fixture ?? tc.engine,
+        output,
+        {
+          runtime: tc.runtime,
+          driver: tc.driver,
+          emit_query_factory: true,
+          ...tc.extra,
+        },
+        tc.name,
+      ),
     ),
   );
   for (const tc of cases) {
-    await t.step(tc.name, async () => {
+    await t.test(tc.name, async () => {
       const generated = await compareBuilds(join(output, tc.name));
       assert(
         Object.keys(generated).length >= 3,
@@ -227,13 +255,32 @@ Deno.test("stock sqlc generates all driver and option fixtures", async (t) => {
         assert(!generated["query_sql.ts"]?.includes("export function"));
       }
       if (tc.name.startsWith("enum-")) assert(generated["enums.ts"]);
+      if (tc.driver === "bun:sqlite") {
+        assert.match(generated["runtime_sqlite.ts"]!, /from "bun:sqlite"/);
+        assert(!generated["runtime_sqlite.ts"]!.includes("setReadBigInts"));
+        assert(!generated["runtime_sqlite.ts"]!.includes("setReturnArrays"));
+        assert(!generated["query_sql.ts"]!.includes("export async function"));
+      }
+      if (tc.driver === "node:sqlite" && !tc.extra?.types_only) {
+        assert.match(generated["runtime_sqlite.ts"]!, /from "node:sqlite"/);
+        assert.match(generated["runtime_sqlite.ts"]!, /DatabaseSync/);
+        assert(!generated["query_sql.ts"]!.includes("export async function"));
+      }
     });
   }
   for (const driver of ["pg", "postgres", "mysql2", "better-sqlite3"]) {
-    await t.step(`Node and Bun output matches: ${driver}`, async () => {
+    await t.test(`Node and Bun output matches: ${driver}`, async () => {
       assert.deepEqual(
         await files(join(output, `node-${driver}`, "wasm")),
         await files(join(output, `bun-${driver}`, "wasm")),
+      );
+    });
+  }
+  for (const runtime of ["bun"]) {
+    await t.test(`Node and ${runtime} node:sqlite output matches`, async () => {
+      assert.deepEqual(
+        await files(join(output, "node-sqlite", "wasm")),
+        await files(join(output, `${runtime}-node-sqlite`, "wasm")),
       );
     });
   }

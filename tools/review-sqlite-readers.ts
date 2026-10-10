@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 /** Strict source transformation used only by the explicit fixture review tool. */
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
@@ -10,9 +11,7 @@ import {
 } from "./assets.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const ts = createRequire(import.meta.url)(
-  `${root}/tests/integration/node_modules/typescript/lib/typescript.js`,
-);
+const ts = createRequire(import.meta.url)("typescript");
 const readers = [
   "readRowsAffected",
   "readLastInsertId",
@@ -43,7 +42,7 @@ function importEntries(source: string) {
     match[1].split(", ").map((specifier) => {
       const [name, alias = name] = specifier.split(" as ");
       return { path: match[2], name, alias };
-    })
+    }),
   );
 }
 function exported(source: string): string[] {
@@ -72,29 +71,36 @@ function checkRuntimeChanges(before: string, after: string): void {
       true,
     );
     assert.equal(syntax.parseDiagnostics.length, 0);
-    return new Map((syntax.statements as Statement[]).map((statement) => {
-      const text = statement.getText();
-      return [
-        statement.name?.text ??
-          statement.declarationList?.declarations.map((item) => item.name.text)
-            .join(",") ??
+    return new Map(
+      (syntax.statements as Statement[]).map((statement) => {
+        const text = statement.getText();
+        return [
+          statement.name?.text ??
+            statement.declarationList?.declarations
+              .map((item) => item.name.text)
+              .join(",") ??
+            text,
           text,
-        text,
-      ];
-    }));
+        ];
+      }),
+    );
   };
-  const old = statements(before), next = statements(after);
+  const old = statements(before),
+    next = statements(after);
   for (const [name, source] of old) {
     if (
       !next.has(name) &&
       /^(?:import|export) \{ withCodecContext \}/.test(source)
-    ) continue;
+    )
+      continue;
     let expected = source;
     if (name === "runQuery") {
-      expected = expected.replace(
-        'read: (result: ReturnType<ReturnType<Database["prepare"]>["run"]>) => T,',
-        "read: (result: SqliteRunResult, context?: QueryContext) => T,\n  context?: QueryContext,",
-      ).replace("read(stmt.run(params))", "read(stmt.run(params), context)");
+      expected = expected
+        .replace(
+          'read: (result: ReturnType<ReturnType<Database["prepare"]>["run"]>) => T,',
+          "read: (result: SqliteRunResult, context?: QueryContext) => T,\n  context?: QueryContext,",
+        )
+        .replace("read(stmt.run(params))", "read(stmt.run(params), context)");
     }
     if (name === "acquireStatement") {
       expected = expected.replace(
@@ -127,37 +133,43 @@ export async function reviewSqliteReaders(
 ): Promise<Map<string, string>> {
   const sqlite = before.get("runtime_sqlite.ts");
   if (!sqlite) return new Map(before);
-  const driver = sqlite.includes('from "@bonakodo/sqlite"') ? 5 : 4;
+  const driver = sqlite.includes('from "node:sqlite"')
+    ? 6
+    : sqlite.includes('from "bun:sqlite"')
+      ? 7
+      : 4;
   const expected = new Map(before);
   const metadata = new Map(
     Array.from(
       (before.get("query_helpers.ts") ?? "").matchAll(
         /^export const ([\w$]+) = \["(rowsAffected|lastInsertId)", "(bigint|number)"\] as const;\n/gm,
       ),
-      (
-        match,
-      ) => [match[1], { field: match[2], type: match[3], source: match[0] }],
+      (match) => [
+        match[1],
+        { field: match[2], type: match[3], source: match[0] },
+      ],
     ),
   );
   const selected = new Set<string>();
   for (const [file, source] of before) {
     if (file.startsWith("runtime_") || file === "query_helpers.ts") continue;
     const entries = importEntries(source);
-    const run = entries.find((entry) =>
-      entry.path.endsWith("/runtime_sqlite.ts") && entry.name === "runQuery"
+    const run = entries.find(
+      (entry) =>
+        entry.path.endsWith("/runtime_sqlite.ts") && entry.name === "runQuery",
     );
     const convert = entries.find((entry) => entry.name === "withCodecContext");
     if (!run || !convert) continue;
     const fields = new Map(
-      entries.filter((entry) => entry.path.endsWith("/query_helpers.ts")).map((
-        entry,
-      ) => [entry.alias, metadata.get(entry.name)]),
+      entries
+        .filter((entry) => entry.path.endsWith("/query_helpers.ts"))
+        .map((entry) => [entry.alias, metadata.get(entry.name)]),
     );
     const newImports = new Map<string, string>();
     const conversion = new RegExp(
-      `^${
-        escape(convert.alias)
-      }\\(([\\w$]+), "decode", \\(\\) => (BigInt|Number)\\(result\\.(changes|lastInsertRowid)\\), ([\\w$]+)\\)$`,
+      `^${escape(
+        convert.alias,
+      )}\\(([\\w$]+), "decode", \\(\\) => (BigInt|Number)\\(result\\.(changes|lastInsertRowid)\\), ([\\w$]+)\\)$`,
     );
     const read = (body: string) => {
       const match = conversion.exec(body);
@@ -171,18 +183,19 @@ export async function reviewSqliteReaders(
       assert(property !== "changes" || operation === "BigInt");
       return {
         context,
-        reader: property === "changes"
-          ? "readRowsAffected"
-          : operation === "BigInt"
-          ? "readLastInsertId"
-          : "readLastInsertNumber",
+        reader:
+          property === "changes"
+            ? "readRowsAffected"
+            : operation === "BigInt"
+              ? "readLastInsertId"
+              : "readLastInsertNumber",
       };
     };
     let transformed = source.replace(
       new RegExp(
-        `^( {2}return ${
-          escape(run.alias)
-        }\\([^\\n]*), \\(result\\) => \\{\\n {4}return ([^\\n]*);\\n {2}\\}\\);`,
+        `^( {2}return ${escape(
+          run.alias,
+        )}\\([^\\n]*), \\(result\\) => \\{\\n {4}return ([^\\n]*);\\n {2}\\}\\);`,
         "gm",
       ),
       (_, start: string, body: string) => {
@@ -191,15 +204,16 @@ export async function reviewSqliteReaders(
           body,
         );
         if (result) {
-          const rows = read(result[1]), last = read(result[2]);
+          const rows = read(result[1]),
+            last = read(result[2]);
           assert.equal(rows.reader, "readRowsAffected");
           assert.equal(last.reader, "readLastInsertId");
           assert.equal(last.context, rows.context);
           context = rows.context;
           reader = "readExecResult";
         } else ({ context, reader } = read(body));
-        const imported = importEntries(candidate.get(file)!).find((entry) =>
-          entry.path === run.path && entry.name === reader
+        const imported = importEntries(candidate.get(file)!).find(
+          (entry) => entry.path === run.path && entry.name === reader,
         );
         assert(imported, `missing ${reader} import in ${file}`);
         assert.match(imported.alias, new RegExp(`^_${reader}(?:_\\d+)?$`));
@@ -214,15 +228,17 @@ export async function reviewSqliteReaders(
       (_, start: string, values: string, end: string, path: string) => {
         const specifiers = values.split(", ").filter((value) => {
           const [name, alias = name] = value.split(" as ");
-          return used.has(alias) ||
-            (name !== "withCodecContext" && !metadata.has(name));
+          return (
+            used.has(alias) ||
+            (name !== "withCodecContext" && !metadata.has(name))
+          );
         });
         if (path === run.path && start === "import { ") {
           for (const [name, alias] of newImports) {
             specifiers.push(`${name} as ${alias}`);
           }
         }
-        specifiers.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+        specifiers.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
         return specifiers.length ? start + specifiers.join(", ") + end : "";
       },
     );
@@ -231,13 +247,13 @@ export async function reviewSqliteReaders(
   const helper = expected.get("query_helpers.ts");
   if (helper) {
     const imported = new Set(
-      [...expected].filter(([file]) => file !== "query_helpers.ts").flatMap((
-        [, source],
-      ) =>
-        importEntries(source).filter((entry) =>
-          entry.path.endsWith("/query_helpers.ts")
-        ).map((entry) => entry.name)
-      ),
+      [...expected]
+        .filter(([file]) => file !== "query_helpers.ts")
+        .flatMap(([, source]) =>
+          importEntries(source)
+            .filter((entry) => entry.path.endsWith("/query_helpers.ts"))
+            .map((entry) => entry.name),
+        ),
     );
     const helperUses = identifiers(
       helper.replace(/^export const [\w$]+ = .*;\n/gm, ""),
@@ -253,27 +269,29 @@ export async function reviewSqliteReaders(
     else expected.set("query_helpers.ts", next);
   }
   const templates = Object.fromEntries(
-    await Promise.all([
-      "runtime_common",
-      "runtime_sqlite",
-      "runtime_postgresql",
-      "runtime_mysql",
-      "json",
-      "codec_error",
-    ].map(async (
-      name,
-    ) => [
-      name,
-      await Deno.readTextFile(`${root}/src/templates/${name}.ts`) +
-      (name.startsWith("runtime_") && name !== "runtime_common"
-        ? "\n" +
-          await Deno.readTextFile(
-            `${root}/src/templates/${
-              name.replace("runtime_", "execution_")
-            }.ts`,
-          )
-        : ""),
-    ])),
+    await Promise.all(
+      [
+        "runtime_common",
+        "runtime_sqlite",
+        "runtime_postgresql",
+        "runtime_mysql",
+        "json",
+        "codec_error",
+      ].map(async (name) => [
+        name,
+        (await readFile(`${root}/src/templates/${name}.ts`, "utf8")) +
+          (name.startsWith("runtime_") && name !== "runtime_common"
+            ? "\n" +
+              (await readFile(
+                `${root}/src/templates/${name.replace(
+                  "runtime_",
+                  "execution_",
+                )}.ts`,
+                "utf8",
+              ))
+            : ""),
+      ]),
+    ),
   ) as unknown as Templates;
   const declarations = compileRuntimeTemplates(templates);
   const oldRuntime = sqlite + (before.get("runtime_common.ts") ?? "");
@@ -281,21 +299,25 @@ export async function reviewSqliteReaders(
   for (const declaration of declarations) {
     for (const fragment of declaration.fragments) {
       if (
-        fragment.kinds && fragment.text.trim() &&
+        fragment.kinds &&
+        fragment.text.trim() &&
         oldRuntime.includes(fragment.text.trim())
-      ) kinds |= fragment.kinds;
+      )
+        kinds |= fragment.kinds;
     }
   }
-  const imports = [...expected].filter(([file]) => !file.startsWith("runtime_"))
+  const imports = [...expected]
+    .filter(([file]) => !file.startsWith("runtime_"))
     .flatMap(([, source]) => importEntries(source));
   const roots = new Set([...exported(oldRuntime), ...selected]);
   const executionStart = sqlite.search(
     /^(?:interface StatementLease|export function (?:queryOne|queryMany|executeQuery|runQuery))\b/m,
   );
   if (
-    ["safeInteger", "epochMilliseconds", "sqliteBoolean", "jsonText"].every((
-      name,
-    ) => roots.has(name)) && executionStart >= 0 &&
+    ["safeInteger", "epochMilliseconds", "sqliteBoolean", "jsonText"].every(
+      (name) => roots.has(name),
+    ) &&
+    executionStart >= 0 &&
     sqlite.slice(0, executionStart).endsWith("\n\n\n")
   ) {
     // This dependency-only marker contributes one otherwise empty line.
@@ -312,11 +334,10 @@ export async function reviewSqliteReaders(
     runtimeKinds.filter((_, index) => kinds & (1 << index)),
   );
   for (const [file, body] of rendered) {
-    const end = sqlite.indexOf("export type { Database };\n") +
+    const end =
+      sqlite.indexOf("export type { Database };\n") +
       "export type { Database };\n".length;
-    const prefix = file === "runtime_common.ts"
-      ? header
-      : sqlite.slice(0, end) + (driver === 5 ? "\n" : "");
+    const prefix = file === "runtime_common.ts" ? header : sqlite.slice(0, end);
     const source = (prefix + body).trimEnd() + "\n";
     checkRuntimeChanges(before.get(file)!, source);
     expected.set(file, source);

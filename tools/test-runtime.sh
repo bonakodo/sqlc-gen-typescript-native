@@ -3,5 +3,6 @@
 set -eu
 cd "$(dirname "$0")/.."
 tools/build.sh
-deno run --allow-read --allow-write tests/runtime/prepare.ts
-deno test --config tests/integration/deno.json --allow-read --allow-write --allow-env --allow-ffi tests/runtime/
+"${NODE:-node}" tests/runtime/prepare.ts
+node_modules/.bin/tsc --project tests/runtime/tsconfig.json
+"${NODE:-node}" --test tests/runtime/*test.ts

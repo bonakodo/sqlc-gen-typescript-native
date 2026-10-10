@@ -99,8 +99,6 @@
 (func $drv_prepare_safe (result i32 i32) (i32.const 3108608) (i32.const 49))
 (data (i32.const 3108864) "try {")
 (func $drv_try (result i32 i32) (i32.const 3108864) (i32.const 5))
-(data (i32.const 3109120) "stmt.safeIntegers();")
-(func $drv_safe (result i32 i32) (i32.const 3109120) (i32.const 20))
 (data (i32.const 3109376) "const row = stmt.raw().get(%s) as %s | undefined;")
 (func $drv_sqlite_get (result i32 i32) (i32.const 3109376) (i32.const 49))
 (data (i32.const 3109632) "const rows = stmt.raw().all(%s) as %s[];")
@@ -113,12 +111,8 @@
 (func $drv_big_changes (result i32 i32) (i32.const 3110400) (i32.const 22))
 (data (i32.const 3110656) "BigInt(result.lastInsertRowid)")
 (func $drv_big_last (result i32 i32) (i32.const 3110656) (i32.const 30))
-(data (i32.const 3110912) "Number(result.lastInsertRowid)")
-(func $drv_number_last (result i32 i32) (i32.const 3110912) (i32.const 30))
 (data (i32.const 3111168) "} finally {")
 (func $drv_finally (result i32 i32) (i32.const 3111168) (i32.const 11))
-(data (i32.const 3111424) "stmt[Symbol.dispose]();")
-(func $drv_dispose (result i32 i32) (i32.const 3111424) (i32.const 23))
 (data (i32.const 3111680) "}")
 (func $drv_end (result i32 i32) (i32.const 3111680) (i32.const 1))
 (data (i32.const 3111936) "const [result] = ")
@@ -205,12 +199,34 @@
 (func $drv_read_rows_affected (result i32 i32) (i32.const 3121664) (i32.const 16))
 (data (i32.const 3121920) "readLastInsertId")
 (func $drv_read_last_insert_id (result i32 i32) (i32.const 3121920) (i32.const 16))
-(data (i32.const 3122176) "readLastInsertNumber")
-(func $drv_read_last_insert_number (result i32 i32) (i32.const 3122176) (i32.const 20))
 (data (i32.const 3122432) "readExecResult")
 (func $drv_read_exec_result (result i32 i32) (i32.const 3122432) (i32.const 14))
 (data (i32.const 3122688) "%s, %s, %s)")
 (func $drv_result_reader_call (result i32 i32) (i32.const 3122688) (i32.const 11))
+
+(data (i32.const 3122944) "stmt.setReadBigInts(true);")
+(func $drv_node_safe (result i32 i32) (i32.const 3122944) (i32.const 26))
+(data (i32.const 3123200) "stmt.setReturnArrays(true);")
+(func $drv_node_arrays (result i32 i32) (i32.const 3123200) (i32.const 27))
+(data (i32.const 3123456) "const row = stmt.get(...%s) as unknown as %s | undefined;")
+(func $drv_node_get (result i32 i32) (i32.const 3123456) (i32.const 57))
+(data (i32.const 3123712) "const rows = stmt.all(...%s) as unknown as %s[];")
+(func $drv_node_all (result i32 i32) (i32.const 3123712) (i32.const 48))
+(data (i32.const 3123968) "stmt.run(...%s);")
+(func $drv_node_run (result i32 i32) (i32.const 3123968) (i32.const 16))
+(data (i32.const 3124224) "const result = stmt.run(...%s);")
+(func $drv_node_run_result (result i32 i32) (i32.const 3124224) (i32.const 31))
+(data (i32.const 3124480) "if (database.isOpen) (stmt as { close?: () => void }).close?.();")
+(func $drv_node_dispose (result i32 i32) (i32.const 3124480) (i32.const 64))
+
+(data (i32.const 3124736) "(stmt as typeof stmt & { safeIntegers(enabled: boolean): unknown }).safeIntegers(true);")
+(func $drv_bun_safe (result i32 i32) (i32.const 3124736) (i32.const 87))
+(data (i32.const 3124992) "const row = stmt.values(...%s)[0] as %s | undefined;")
+(func $drv_bun_get (result i32 i32) (i32.const 3124992) (i32.const 52))
+(data (i32.const 3125248) "const rows = stmt.values(...%s) as %s[];")
+(func $drv_bun_all (result i32 i32) (i32.const 3125248) (i32.const 40))
+(data (i32.const 3125504) "stmt.finalize();")
+(func $drv_bun_dispose (result i32 i32) (i32.const 3125504) (i32.const 16))
 
 ;; Contexts contain source metadata only. Quoting and type formatting complete
 ;; before fmt4 starts, so nested helper use cannot overwrite a live argument.
@@ -403,12 +419,13 @@
   (call $text_append (call $drv_call_close))
   (call $line (call $fmt1 (call $drv_return_value) (local.get $start) (i32.sub (global.get $txt_cursor) (local.get $start)))))
 
-;; The SQLite drivers share row conversion and write-result policy. Deno owns
-;; and disposes the statement in finally; better-sqlite3 owns that lifetime.
+;; The SQLite drivers share row conversion and write-result policy. Node and Bun
+;; close statements in finally; better-sqlite3 owns that lifetime.
 (func $driver_sqlite (param $m i32) (param $plan i32) (param $bindings i32) (param $bindings_n i32)
-  (param $sql i32) (param $sql_n i32) (param $deno i32)
+  (param $sql i32) (param $sql_n i32)
   (local $cmd i32) (local $tuple i32) (local $tuple_n i32) (local $value i32) (local $value_n i32)
-  (local $count i32) (local $i i32) (local $reader i32) (local $reader_n i32)
+  (local $count i32) (local $i i32) (local $reader i32) (local $reader_n i32) (local $node i32)
+  (local.set $node (i32.ge_u (global.get $opt_driver) (i32.const 6)))
   (local.set $cmd (i32.load offset=12 (local.get $plan)))
   (if (global.get $compact_active)
     (then
@@ -416,8 +433,7 @@
         (if (result i32 i32) (i32.eq (local.get $cmd) (i32.const 4))
           (then (call $drv_read_rows_affected))
           (else (if (result i32 i32) (i32.eq (local.get $cmd) (i32.const 5))
-            (then (if (result i32 i32) (i32.and (local.get $deno) (i32.eqz (global.get $opt_mode_native)))
-              (then (call $drv_read_last_insert_number)) (else (call $drv_read_last_insert_id))))
+            (then (call $drv_read_last_insert_id))
             (else (call $drv_read_exec_result))))) (i32.const 0))
       (local.set $reader_n) (local.set $reader)
       (call $line (call $fmt1 (call $drv_return_value)
@@ -427,9 +443,10 @@
           (local.get $reader) (local.get $reader_n)
           (call $get_text (local.get $m) (i32.const 40)))))
       (return)))
-  (if (local.get $deno)
+  (if (local.get $node)
     (then (call $line (call $fmt1 (call $drv_prepare) (local.get $sql) (local.get $sql_n)))
-      (call $line (call $drv_try)) (call $indent) (call $line (call $drv_safe)))
+      (call $line (call $drv_try)) (call $indent)
+      (call $line (if (result i32 i32) (i32.eq (global.get $opt_driver) (i32.const 7)) (then (call $drv_bun_safe)) (else (call $drv_node_safe)))))
     (else (call $line (call $fmt1 (call $drv_prepare_safe) (local.get $sql) (local.get $sql_n)))))
   (block $query_done
     (if (i32.le_u (i32.sub (local.get $cmd) (i32.const 1)) (i32.const 1)) (then
@@ -442,30 +459,29 @@
         (call $text_append (local.get $value) (local.get $value_n))
         (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $tuple_loop)))
       (call $text_byte (i32.const 93)) (local.set $tuple_n (i32.sub (global.get $txt_cursor) (local.get $tuple)))
+      (if (i32.eq (global.get $opt_driver) (i32.const 6)) (then (call $line (call $drv_node_arrays))))
       (if (i32.eq (local.get $cmd) (i32.const 1))
-        (then (call $line (call $fmt2 (call $drv_sqlite_get) (local.get $bindings) (local.get $bindings_n) (local.get $tuple) (local.get $tuple_n)))
+        (then (call $line (call $fmt2 (if (result i32 i32) (local.get $node) (then (if (result i32 i32) (i32.eq (global.get $opt_driver) (i32.const 7)) (then (call $drv_bun_get)) (else (call $drv_node_get)))) (else (call $drv_sqlite_get))) (local.get $bindings) (local.get $bindings_n) (local.get $tuple) (local.get $tuple_n)))
           (call $line (call $fmt1 (call $drv_missing_row) (call $null_text))) (call $driver_row (local.get $m) (local.get $plan)))
-        (else (call $line (call $fmt2 (call $drv_sqlite_all) (local.get $bindings) (local.get $bindings_n) (local.get $tuple) (local.get $tuple_n)))
+        (else (call $line (call $fmt2 (if (result i32 i32) (local.get $node) (then (if (result i32 i32) (i32.eq (global.get $opt_driver) (i32.const 7)) (then (call $drv_bun_all)) (else (call $drv_node_all)))) (else (call $drv_sqlite_all))) (local.get $bindings) (local.get $bindings_n) (local.get $tuple) (local.get $tuple_n)))
           (call $driver_rows (local.get $m) (local.get $plan)))) (br $query_done)))
     (if (i32.eq (local.get $cmd) (i32.const 3)) (then
-      (call $line (call $fmt1 (call $drv_run) (local.get $bindings) (local.get $bindings_n))) (br $query_done)))
+      (call $line (call $fmt1 (if (result i32 i32) (local.get $node) (then (call $drv_node_run)) (else (call $drv_run))) (local.get $bindings) (local.get $bindings_n))) (br $query_done)))
     (if (i32.eqz (global.get $compact_active)) (then
-      (call $line (call $fmt1 (call $drv_run_result) (local.get $bindings) (local.get $bindings_n)))))
+      (call $line (call $fmt1 (if (result i32 i32) (local.get $node) (then (call $drv_node_run_result)) (else (call $drv_run_result))) (local.get $bindings) (local.get $bindings_n)))))
     (if (i32.eq (local.get $cmd) (i32.const 4)) (then
       (call $line (call $fmt1 (call $drv_return_value)
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_rows_affected) (call $drv_bigint) (call $drv_big_changes)))) (br $query_done)))
     (if (i32.eq (local.get $cmd) (i32.const 5)) (then
-      (if (i32.and (local.get $deno) (i32.eqz (global.get $opt_mode_native)))
-        (then (call $line (call $fmt1 (call $drv_return_value)
-          (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_last_id) (call $drv_number) (call $drv_number_last)))))
-        (else (call $line (call $fmt1 (call $drv_return_value)
-          (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_last_id) (call $drv_bigint) (call $drv_big_last)))))) (br $query_done)))
+      (call $line (call $fmt1 (call $drv_return_value)
+        (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_last_id) (call $drv_bigint) (call $drv_big_last)))) (br $query_done)))
     (if (i32.eq (local.get $cmd) (i32.const 6)) (then
       (call $line (call $fmt2 (call $drv_return_result)
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_rows_affected) (call $drv_bigint) (call $drv_big_changes))
         (call $driver_convert_result (local.get $m) (local.get $plan) (call $drv_last_id) (call $drv_bigint) (call $drv_big_last)))))))
-  (if (local.get $deno) (then
-    (call $dedent) (call $line (call $drv_finally)) (call $indent) (call $line (call $drv_dispose)) (call $dedent) (call $line (call $drv_end)))))
+  (if (local.get $node) (then
+    (call $dedent) (call $line (call $drv_finally)) (call $indent)
+    (call $line (if (result i32 i32) (i32.eq (global.get $opt_driver) (i32.const 7)) (then (call $drv_bun_dispose)) (else (call $drv_node_dispose)))) (call $dedent) (call $line (call $drv_end)))))
 
 (func $driver_mysql_unsigned (result i32 i32)
   (if (i32.lt_s (global.get $opt_mysql_insert_unsigned) (i32.const 0)) (then (return (call $drv_undefined))))
@@ -534,8 +550,7 @@
       (call $driver_shared_rows (local.get $m) (local.get $plan)
         (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (return)))))
   (if (i32.ge_u (global.get $opt_driver) (i32.const 4)) (then
-    (call $driver_sqlite (local.get $m) (local.get $plan) (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)
-      (i32.eq (global.get $opt_driver) (i32.const 5))) (return)))
+    (call $driver_sqlite (local.get $m) (local.get $plan) (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (return)))
   (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then
     (call $driver_mysql (local.get $m) (local.get $plan) (local.get $bindings) (local.get $bindings_n) (local.get $sql) (local.get $sql_n)) (return)))
   (if (i32.eq (global.get $opt_driver) (i32.const 1)) (then

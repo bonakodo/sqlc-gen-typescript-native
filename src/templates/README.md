@@ -18,13 +18,18 @@ fragments join their engine's runtime during the build. They share query
 execution across generated functions and follow the same declaration pruning
 rules. SQLite helpers keep row decoding and write-result conversion inside
 statement cleanup; each driver retains its own missing-row and return-value
-rules. The @bonakodo/sqlite alternative owns a bounded statement cache through
-one runtime-local WeakMap, with configurable capacity and explicit clearing.
+rules. The node:sqlite and bun:sqlite alternatives own a bounded
+statement cache through one runtime-local WeakMap, with configurable capacity
+and explicit clearing.
 Leases protect active entries through result conversion; temporary handles cover
-nested calls and full active caches. The driver resets and clears transient
-bindings; the runtime disposes on eviction/error/clear. It configures raw rows
-and safe integers only once per prepared handle. Other drivers keep their own
-preparation policies and resource lifecycle. Helpers never own connections.
+nested calls and full active caches. These drivers reset statements. node:sqlite
+can retain bound values until the next execution or release. The runtime releases
+handles on eviction/error/clear, using optional `close()` for node:sqlite;
+Bun 1.4.2 rely on garbage collection for those handles. It configures array rows and bigint reads
+only once per prepared handle. bun:sqlite uses per-statement `safeIntegers(true)`,
+array rows from `values()`, and explicit finalization. Its `:one` path reads all
+rows and returns the first. Other drivers keep their own preparation policies
+and resource lifecycle. Helpers never own connections.
 
 [assets.ts](../../tools/assets.ts) builds a dependency table from the templates.
 [runtime.wat](../runtime.wat) records imports and conversion kinds as it plans
@@ -40,10 +45,10 @@ Template markers describe declarations and optional branches:
   dependencies the source does not show, such as `common.checkedJson` for an
   import from the common file. The build ignores identifiers in comments and
   quoted text; list any dependency used inside a template-string expression.
-- Add `@pg`, `@postgres`, `@mysql2`, `@bonakodo`, or `@better-sqlite3` to a part
-  to select a driver within the file's engine. Driver alternatives can share
-  a declaration name when their driver sets do not overlap. Shared server
-  implementations use all three server driver names. Their dependencies on
+- Add `@pg`, `@postgres`, `@mysql2`, `@node-sqlite`,
+  `@better-sqlite3`, or `@bun-sqlite` to a part to select a driver within the file's engine. Driver
+  alternatives can share a declaration name when their driver sets do not
+  overlap. Shared server implementations use all three server driver names. Their dependencies on
   engine reexports apply only to that engine's drivers; these build-time edges
   preserve direct helper imports without a TypeScript module import cycle.
 - `// @when kind ...` starts a branch needed by any listed conversion kind;
@@ -75,9 +80,9 @@ codec family when a query uses an external SQLite codec. Built-in presets and
 explicit generated-runtime mappings retain only the selected preset.
 
 The templates contain marked alternatives, so tests use files from the actual
-WASM generator. `deno task runtime` builds the plugin, generates SQLite, pg,
+WASM generator. `npm run runtime` builds the plugin, generates SQLite, pg,
 postgres.js, and MySQL support under the ignored `tests/runtime/.generated/`
-directory, and tests those files with Deno. Its fixtures request every tested
+directory, and tests those files with Node. Its fixtures request every tested
 conversion and codec, so the tests also check dependency pruning. This suite
 needs no sqlc executable. Integration tests generate complete projects with
 stock sqlc and check their types and driver behavior.

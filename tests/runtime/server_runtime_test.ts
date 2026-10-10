@@ -1,3 +1,4 @@
+import { test } from "node:test";
 import { Buffer } from "node:buffer";
 import {
   decodeArray,
@@ -18,9 +19,8 @@ import {
 
 function equal(actual: unknown, expected: unknown): void {
   const json = (value: unknown) =>
-    JSON.stringify(
-      value,
-      (_key, item: unknown) => typeof item === "bigint" ? `${item}n` : item,
+    JSON.stringify(value, (_key, item: unknown) =>
+      typeof item === "bigint" ? `${item}n` : item,
     );
   if (json(actual) !== json(expected)) {
     throw new Error(`Expected ${json(expected)}, got ${json(actual)}`);
@@ -36,7 +36,7 @@ function throws(operation: () => unknown): void {
   throw new Error("Expected an error");
 }
 
-Deno.test("MySQL insert IDs honor both options without losing precision", () => {
+test("MySQL insert IDs honor both options without losing precision", () => {
   for (const value of [3, "3", 3n]) {
     equal(mysqlInsertId(value, false, false), 3);
     equal(mysqlInsertId(value, false, true), 3);
@@ -45,13 +45,11 @@ Deno.test("MySQL insert IDs honor both options without losing precision", () => 
   }
   equal(mysqlInsertId("9007199254740991", false, false), 9007199254740991);
   equal(mysqlInsertId("9007199254740991", true, false), 9007199254740991);
-  for (
-    const value of [
-      "9007199254740992",
-      "9007199254740993",
-      "9223372036854775807",
-    ]
-  ) {
+  for (const value of [
+    "9007199254740992",
+    "9007199254740993",
+    "9223372036854775807",
+  ]) {
     equal(mysqlInsertId(value, true, false), value);
     equal(mysqlInsertId(value, true, true), value);
     equal(mysqlInsertId(BigInt(value), true, true), value);
@@ -64,7 +62,7 @@ Deno.test("MySQL insert IDs honor both options without losing precision", () => 
   throws(() => mysqlInsertId(9007199254740992, true, true));
 });
 
-Deno.test("MySQL ambiguous signed OK-packet IDs never return the wrong value", () => {
+test("MySQL ambiguous signed OK-packet IDs never return the wrong value", () => {
   for (const value of [-1, "-1", "-9223372036854775808"]) {
     throws(() => mysqlInsertIdBigInt(value));
     throws(() => mysqlInsertId(value, false, false));
@@ -73,7 +71,7 @@ Deno.test("MySQL ambiguous signed OK-packet IDs never return the wrong value", (
   }
 });
 
-Deno.test("MySQL explicit ID signedness preserves both 64-bit ranges", () => {
+test("MySQL explicit ID signedness preserves both 64-bit ranges", () => {
   equal(mysqlInsertIdBigInt("-1", false), -1n);
   equal(
     mysqlInsertIdBigInt("-9223372036854775808", false),
@@ -107,7 +105,7 @@ Deno.test("MySQL explicit ID signedness preserves both 64-bit ranges", () => {
   throws(() => mysqlInsertIdBigInt(9007199254740992, true));
 });
 
-Deno.test("server types follow driver defaults and retain large decimal strings", () => {
+test("server types follow driver defaults and retain large decimal strings", () => {
   const value = "9223372036854775807";
   equal(decodeValue("string", value, false, false), value);
   equal(encodeValue("string", value), value);
@@ -124,7 +122,7 @@ Deno.test("server types follow driver defaults and retain large decimal strings"
   );
 });
 
-Deno.test("null rules and codecs leave absent values outside custom code", () => {
+test("null rules and codecs leave absent values outside custom code", () => {
   equal(encodeValue("string", undefined), null);
   equal(decodeValue("string", null, true, false), null);
   equal(decodeValue("string", null, true, true), undefined);
@@ -144,7 +142,7 @@ Deno.test("null rules and codecs leave absent values outside custom code", () =>
   throws(() => encodeCustom({ encode: () => null, decode: () => 0 }, 1, false));
 });
 
-Deno.test("pg geometry binds PostgreSQL text and decodes objects", () => {
+test("pg geometry binds PostgreSQL text and decodes objects", () => {
   equal(encodeValue("point", { x: 1, y: 2 }), "(1,2)");
   equal(encodeValue("circle", { x: 1, y: 2, radius: 3 }), "<(1,2),3>");
   equal(encodeArray("point", [{ x: 1, y: 2 }, null], 1), ["(1,2)", null]);
@@ -152,7 +150,7 @@ Deno.test("pg geometry binds PostgreSQL text and decodes objects", () => {
   throws(() => encodeValue("point", { x: "1", y: 2 }));
 });
 
-Deno.test("pg arrays keep nested NULL elements and parse unknown enum array OIDs", () => {
+test("pg arrays keep nested NULL elements and parse unknown enum array OIDs", () => {
   equal(parseArrayText('{"a,b","NULL",NULL,"a\\"b","a\\\\b"}'), [
     "a,b",
     "NULL",
@@ -160,22 +158,39 @@ Deno.test("pg arrays keep nested NULL elements and parse unknown enum array OIDs
     'a"b',
     "a\\b",
   ]);
-  equal(parseArrayText("[0:1][2:3]={{a,b},{c,d}}"), [["a", "b"], ["c", "d"]]);
+  equal(parseArrayText("[0:1][2:3]={{a,b},{c,d}}"), [
+    ["a", "b"],
+    ["c", "d"],
+  ]);
   equal(parseArrayText("{}"), []);
   equal(decodeArray("string", '{"draft","live",NULL}', 1, false, false), [
     "draft",
     "live",
     null,
   ]);
-  equal(decodeArray("number", [[1, null], [2, 3]], 2, false, true), [[
-    1,
-    undefined,
-  ], [2, 3]]);
-  equal(decodeArray("circle", '{"<(1,2),3>"}', 1, false, false), [{
-    x: 1,
-    y: 2,
-    radius: 3,
-  }]);
+  equal(
+    decodeArray(
+      "number",
+      [
+        [1, null],
+        [2, 3],
+      ],
+      2,
+      false,
+      true,
+    ),
+    [
+      [1, undefined],
+      [2, 3],
+    ],
+  );
+  equal(decodeArray("circle", '{"<(1,2),3>"}', 1, false, false), [
+    {
+      x: 1,
+      y: 2,
+      radius: 3,
+    },
+  ]);
   equal(
     decodeArrayCustom(
       {
@@ -197,13 +212,13 @@ Deno.test("pg arrays keep nested NULL elements and parse unknown enum array OIDs
   throws(() => decodeArray("number", ["1"], 1, false, false));
 });
 
-Deno.test("execution metadata never turns an already rounded count into a bigint", () => {
+test("execution metadata never turns an already rounded count into a bigint", () => {
   equal(integerResult(3), 3n);
   equal(integerResult("9007199254740993"), 9007199254740993n);
   throws(() => integerResult(9007199254740992));
 });
 
-Deno.test("JSON binds serialize scalars and arrays without using pg array syntax", () => {
+test("JSON binds serialize scalars and arrays without using pg array syntax", () => {
   equal(encodeValue("json", [1, "two", null], false), '[1,"two",null]');
   equal(encodeValue("json", "quoted", false), '"quoted"');
   equal(encodeValue("json", { ok: true }, false), '{"ok":true}');
@@ -217,7 +232,7 @@ Deno.test("JSON binds serialize scalars and arrays without using pg array syntax
   throws(() => encodeValue("json", 1n, false));
 });
 
-Deno.test("raw PostgreSQL arrays decode scalar values before custom codecs", () => {
+test("raw PostgreSQL arrays decode scalar values before custom codecs", () => {
   const codec = {
     encode: (x: number) => x,
     decode: (x: unknown) => {
@@ -232,7 +247,7 @@ Deno.test("raw PostgreSQL arrays decode scalar values before custom codecs", () 
   ]);
 });
 
-Deno.test("box arrays bind and decode their PostgreSQL semicolon delimiter", () => {
+test("box arrays bind and decode their PostgreSQL semicolon delimiter", () => {
   const boxes = ["(3,4),(1,2)", null, "(7,8),(5,6)"];
   equal(encodeArray("box", boxes, 1), '{"(3,4),(1,2)";NULL;"(7,8),(5,6)"}');
   equal(

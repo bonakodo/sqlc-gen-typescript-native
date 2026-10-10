@@ -1,3 +1,7 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { sqliteDefaultOptions } from "./test_helpers.ts";
 import { generateAssets } from "../../tools/assets.ts";
 import type {
   Column,
@@ -17,7 +21,7 @@ import {
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT scopes", async () => {
+test("WAT scopes", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     build_enums: () => void;
@@ -85,7 +89,7 @@ Deno.test("WAT scopes", async () => {
   }
   // Exact path, module, and catalog checks against the prior generator's frozen
   // reference results. Normal tests compile hand-written WAT only.
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-scopes-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-scopes-"));
   let wasm;
   try {
     const assets = await generateAssets();
@@ -110,7 +114,7 @@ Deno.test("WAT scopes", async () => {
     ];
     const fragments = await Promise.all(
       names.map((n) =>
-        Deno.readTextFile(new URL(`../../src/${n}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${n}.wat`, import.meta.url), "utf8"),
       ),
     );
     const funcs = [
@@ -166,21 +170,27 @@ Deno.test("WAT scopes", async () => {
       "out_indent",
       "file_count",
     ];
-    const source = "(module\n" + fragments.join("\n") + legacyOutputHarness +
+    const source =
+      "(module\n" +
+      fragments.join("\n") +
+      legacyOutputHarness +
       "\n" +
-      assets + "\n" +
-      funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") + "\n" +
-      globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") + "\n)";
-    await Deno.writeTextFile(join(directory, "types.wat"), source);
-    const compile = await command(wabt("wat2wasm"), [
-      join(directory, "types.wat"),
-      "-o",
-      join(directory, "types.wasm"),
-    ], { encoding: "utf8" });
+      assets +
+      "\n" +
+      funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") +
+      "\n" +
+      globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") +
+      "\n)";
+    await writeFile(join(directory, "types.wat"), source);
+    const compile = await command(
+      wabt("wat2wasm"),
+      [join(directory, "types.wat"), "-o", join(directory, "types.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(compile.status, 0, compile.stderr);
-    wasm = await Deno.readFile(join(directory, "types.wasm"));
+    wasm = await readFile(join(directory, "types.wasm"));
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   let stderr = "";
@@ -227,42 +237,46 @@ Deno.test("WAT scopes", async () => {
   function identifier(v?: Identifier) {
     if (!v) return 0;
     const p = e.pb_record(11);
-    for (
-      const [k, f] of [["catalog", 1], ["schema", 2], ["name", 3]] as const
-    ) if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
+    for (const [k, f] of [
+      ["catalog", 1],
+      ["schema", 2],
+      ["name", 3],
+    ] as const)
+      if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
     return p;
   }
   function column(v?: Column) {
     if (!v) return 0;
     const p = e.pb_record(12);
-    for (
-      const [k, f] of [["name", 1], ["comment", 5], ["scope", 9], [
-        "table_alias",
-        11,
-      ], ["original_name", 15]] as const
-    ) if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
-    for (
-      const [k, f] of [
-        ["not_null", 3],
-        ["is_array", 4],
-        ["length", 6],
-        ["is_named_param", 7],
-        ["is_func_call", 8],
-        ["is_sqlc_slice", 13],
-        ["unsigned", 16],
-        ["array_dims", 17],
-      ] as const
-    ) memory.writeInt32LE(Number(v[k] ?? 0), e.slot(p, f));
-    for (
-      const [k, f] of [["table", 10], ["type", 12], [
-        "embed_table",
-        14,
-      ]] as const
-    ) memory.writeInt32LE(identifier(v[k]), e.slot(p, f));
+    for (const [k, f] of [
+      ["name", 1],
+      ["comment", 5],
+      ["scope", 9],
+      ["table_alias", 11],
+      ["original_name", 15],
+    ] as const)
+      if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
+    for (const [k, f] of [
+      ["not_null", 3],
+      ["is_array", 4],
+      ["length", 6],
+      ["is_named_param", 7],
+      ["is_func_call", 8],
+      ["is_sqlc_slice", 13],
+      ["unsigned", 16],
+      ["array_dims", 17],
+    ] as const)
+      memory.writeInt32LE(Number(v[k] ?? 0), e.slot(p, f));
+    for (const [k, f] of [
+      ["table", 10],
+      ["type", 12],
+      ["embed_table", 14],
+    ] as const)
+      memory.writeInt32LE(identifier(v[k]), e.slot(p, f));
     return p;
   }
   const fixture = JSON.parse(
-    await Deno.readTextFile(new URL("./fixtures/scopes.json", import.meta.url)),
+    await readFile(new URL("./fixtures/scopes.json", import.meta.url), "utf8"),
   );
   const mismatches: {
     kind: string;
@@ -297,16 +311,17 @@ Deno.test("WAT scopes", async () => {
     inputCursor = 40000000;
   }
   const errorText = (error: unknown) =>
-    errorMessage(error).replace(/^error generating output: /, "").replace(
-      /\n$/,
-      "",
-    );
+    errorMessage(error)
+      .replace(/^error generating output: /, "")
+      .replace(/\n$/, "");
   // Read the public protobuf response, so module checks remain independent of
   // whether the emitter stores a file in one span or several spans.
   function wireFields(bytes: Buffer) {
     let at = 0;
     function uint() {
-      let n = 0, shift = 0, b;
+      let n = 0,
+        shift = 0,
+        b;
       do {
         assert.ok(at < bytes.length && shift < 35);
         b = bytes[at++];
@@ -332,7 +347,10 @@ Deno.test("WAT scopes", async () => {
     return wireFields(Buffer.concat(stdout)).map(([tag, bytes]) => {
       assert.equal(tag, 1);
       const fields = wireFields(bytes);
-      assert.deepEqual(fields.map(([n]) => n), [1, 2]);
+      assert.deepEqual(
+        fields.map(([n]) => n),
+        [1, 2],
+      );
       return {
         name: fields[0][1].toString(),
         contents: fields[1][1].toString(),
@@ -344,14 +362,13 @@ Deno.test("WAT scopes", async () => {
     reset();
     const pair = put(c.input),
       got: Record<string, unknown> = { input: c.input };
-    for (
-      const [key, fn, args] of [
-        ["clean", "path_clean", [0]],
-        ["windows", "path_clean", [1]],
-        ["dir", "path_dir", []],
-        ["noext", "without_ext", []],
-      ] as const
-    ) got[key] = take((e[fn] as (...args: number[]) => Pair)(...pair, ...args));
+    for (const [key, fn, args] of [
+      ["clean", "path_clean", [0]],
+      ["windows", "path_clean", [1]],
+      ["dir", "path_dir", []],
+      ["noext", "without_ext", []],
+    ] as const)
+      got[key] = take((e[fn] as (...args: number[]) => Pair)(...pair, ...args));
     try {
       got.filename = take(e.query_filename(...pair));
       got.error = "";
@@ -372,7 +389,8 @@ Deno.test("WAT scopes", async () => {
   }
   for (const [i, c] of fixture.modules.entries()) {
     reset();
-    const x = c.input, m = e.module_new(...put(x.Filename));
+    const x = c.input,
+      m = e.module_new(...put(x.Filename));
     for (const n of x.Reserved ?? []) {
       e.reserve(memory.readUInt32LE(m + 16), ...put(n));
     }
@@ -393,13 +411,19 @@ Deno.test("WAT scopes", async () => {
     e.module_begin(m);
     e.line(...put(x.Body));
     e.module_end(m);
-    check("module", i, { aliases, source: generatedFiles()[0].contents }, {
-      aliases: c.aliases,
-      source: c.source,
-    });
+    check(
+      "module",
+      i,
+      { aliases, source: generatedFiles()[0].contents },
+      {
+        aliases: c.aliases,
+        source: c.source,
+      },
+    );
   }
   function list<T>(values: T[] | undefined, make: (value: T) => number) {
-    let head = 0, tail = 0;
+    let head = 0,
+      tail = 0;
     for (const v of values ?? []) {
       const p = make(v);
       if (tail) memory.writeUInt32LE(p, tail + 4);
@@ -448,11 +472,10 @@ Deno.test("WAT scopes", async () => {
     const x = c.input;
     let got: Record<string, unknown> = {};
     try {
-      e.gen_engine.value =
-        ({ sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>)[
-          x.Engine
-        ];
-      const json = Buffer.from(JSON.stringify(x.Options));
+      e.gen_engine.value = (
+        { sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>
+      )[x.Engine];
+      const json = Buffer.from(JSON.stringify(sqliteDefaultOptions(x.Options)));
       memory.set(json, 35000000);
       e.gen_options.value = e.options_parse(35000000, json.length);
       e.gen_query_count.value = x.Queries;
@@ -462,25 +485,20 @@ Deno.test("WAT scopes", async () => {
       link(cat, 4, list(x.Catalog.schemas, schema));
       e.build_models();
       e.build_enums();
-      got.models = walk(
-        e.gen_models.value,
-        (m) => ({
-          name: take(e.get_text(m, 16)),
-          key: take(e.get_text(m, 24)),
-          columns: walk(
-            memory.readUInt32LE(m + 12),
-            (col) => take(e.text(col, 1)),
-          ),
-        }),
-      );
+      got.models = walk(e.gen_models.value, (m) => ({
+        name: take(e.get_text(m, 16)),
+        key: take(e.get_text(m, 24)),
+        columns: walk(memory.readUInt32LE(m + 12), (col) =>
+          take(e.text(col, 1)),
+        ),
+      }));
       got.enums = walk(e.gen_enums.value, (v: number) => ({
         schema: take(e.get_text(v, 8)),
         sql: take(e.get_text(v, 16)),
         name: take(e.get_text(v, 24)),
         valuesName: take(e.get_text(v, 32)),
-        values: walk(
-          memory.readUInt32LE(v + 40),
-          (p: number) => take(e.text(p, 1)),
+        values: walk(memory.readUInt32LE(v + 40), (p: number) =>
+          take(e.text(p, 1)),
         ),
       }));
       const mod = e.module_new(...put("enums.ts"));
@@ -489,7 +507,8 @@ Deno.test("WAT scopes", async () => {
       e.module_end(mod);
       got.source = generatedFiles()[0].contents;
       got.tables = (x.Tables ?? []).map((v: Identifier) => {
-        const id = identifier(v), model = e.find_model(id);
+        const id = identifier(v),
+          model = e.find_model(id);
         return {
           key: take(e.table_key(id)),
           name: model ? take(e.get_text(model, 16)) : "",
@@ -512,8 +531,9 @@ Deno.test("WAT scopes", async () => {
   // escapes. Compare complete original-index permutations, not just sorted keys:
   // duplicate keys must follow the reference sort's exact swap decisions.
   const sortCases = JSON.parse(
-    await Deno.readTextFile(
+    await readFile(
       new URL("./fixtures/model-sort.json", import.meta.url),
+      "utf8",
     ),
   );
   for (const [i, c] of sortCases.entries()) {
@@ -534,7 +554,7 @@ Deno.test("WAT scopes", async () => {
       "sort",
       i,
       c.keys.map((_: string, index: number) =>
-        memory.readUInt32LE(base + index * 256 + 8)
+        memory.readUInt32LE(base + index * 256 + 8),
       ),
       c.order,
     );
@@ -544,16 +564,19 @@ Deno.test("WAT scopes", async () => {
       checked - mismatches.length
     }/${checked} exact reference cases passed`,
   );
-  const failuresPath = Deno.env.get("SCOPES_FAILURES");
+  const failuresPath = process.env["SCOPES_FAILURES"];
   if (failuresPath) {
-    await Deno.writeTextFile(failuresPath, JSON.stringify(mismatches));
+    await writeFile(failuresPath, JSON.stringify(mismatches));
   }
-  for (
-    const kind of ["path", "relative", "module", "catalog", "sort"] as const
-  ) {
-    for (
-      const m of mismatches.filter((m) => m.kind === kind).slice(0, 2)
-    ) console.log(JSON.stringify(m));
+  for (const kind of [
+    "path",
+    "relative",
+    "module",
+    "catalog",
+    "sort",
+  ] as const) {
+    for (const m of mismatches.filter((m) => m.kind === kind).slice(0, 2))
+      console.log(JSON.stringify(m));
   }
   assert.equal(mismatches.length, 0, "path/module/catalog mismatch");
 
@@ -563,17 +586,15 @@ Deno.test("WAT scopes", async () => {
   const header = "// Code generated by sqlc. DO NOT EDIT.\n\n";
   const importLine =
     'import type { Codec as _sqlcImportCodec } from "pkg";\n\n';
-  for (
-    const body of [
-      "",
-      "\n\n",
-      "x",
-      "x\n\n",
-      "x\r\n\n",
-      "日本語\0",
-      "abcdefg\n".repeat(65536),
-    ] as const
-  ) {
+  for (const body of [
+    "",
+    "\n\n",
+    "x",
+    "x\n\n",
+    "x\r\n\n",
+    "日本語\0",
+    "abcdefg\n".repeat(65536),
+  ] as const) {
     for (const imports of [false, true] as const) {
       reset();
       const m = e.module_new(...put("q.ts"));
@@ -588,12 +609,14 @@ Deno.test("WAT scopes", async () => {
         kept,
         "module_end moved body bytes",
       );
-      assert.deepEqual(generatedFiles(), [{
-        name: "q.ts",
-        contents:
-          (header + (imports ? importLine : "") + body).replace(/\n+$/, "") +
-          "\n",
-      }]);
+      assert.deepEqual(generatedFiles(), [
+        {
+          name: "q.ts",
+          contents:
+            (header + (imports ? importLine : "") + body).replace(/\n+$/, "") +
+            "\n",
+        },
+      ]);
     }
   }
 
@@ -601,7 +624,8 @@ Deno.test("WAT scopes", async () => {
   // distinct contents. Sort must retain both spans with each file, preserve equal
   // keys, and stop at the exact table capacity. Short writes cross every span.
   reset();
-  const tableBase = 32768000, tableEnd = tableBase + 1024 * 32;
+  const tableBase = 32768000,
+    tableEnd = tableBase + 1024 * 32;
   memory.fill(0xa5, tableBase - 32, tableBase);
   memory.fill(0xb6, tableEnd, tableEnd + 32);
   const wanted = [];
@@ -626,7 +650,7 @@ Deno.test("WAT scopes", async () => {
     }
   }
   wanted.sort((a, b) =>
-    Buffer.compare(Buffer.from(a.name), Buffer.from(b.name))
+    Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)),
   );
   writeChunk = 3;
   assert.deepEqual(generatedFiles(), wanted);
@@ -658,10 +682,12 @@ Deno.test("WAT scopes", async () => {
     } else {
       e.module_end(m);
       assert.equal(e.out_cursor.value, memory.length);
-      assert.deepEqual(generatedFiles(), [{
-        name: "last.ts",
-        contents: header + "x\n",
-      }]);
+      assert.deepEqual(generatedFiles(), [
+        {
+          name: "last.ts",
+          contents: header + "x\n",
+        },
+      ]);
     }
   }
   console.log(

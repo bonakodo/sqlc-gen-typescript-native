@@ -26,7 +26,7 @@
   (if (i32.and (i32.eq (global.get $gen_engine) (i32.const 2)) (i32.eq (local.get $cmd) (i32.const 5)))
     (then (call $error (call $c_pg_insert_id))))
   (call $declaration_name (call $text (local.get $q) (i32.const 2))) (local.set $base_n) (local.set $base)
-  (if (i32.and (i32.eqz (global.get $opt_mode_native)) (call $identifier (call $text (local.get $q) (i32.const 2))))
+  (if (i32.and (i32.ne (global.get $gen_engine) (i32.const 1)) (call $identifier (call $text (local.get $q) (i32.const 2))))
     (then (call $text (local.get $q) (i32.const 2)) (local.set $base_n) (local.set $base)))
   (local.set $plan (call $work_record (i32.const 106)))
   (i32.store offset=8 (local.get $plan) (local.get $q))
@@ -84,9 +84,7 @@
   (local.get $plan))
 
 (func $database_type (param $m i32) (result i32 i32)
-  (if (result i32 i32) (i32.eq (global.get $opt_driver) (i32.const 5))
-    (then (call $module_import (local.get $m) (call $opt_driver_specifier) (call $c_database) (i32.const 1)))
-    (else (call $runtime_import (local.get $m) (call $c_database) (i32.const 1)))))
+  (call $runtime_import (local.get $m) (call $c_database) (i32.const 1)))
 
 (func $query_header (param $q i32) (result i32 i32)
   (call $fmt2 (call $c_sql_header) (call $text (local.get $q) (i32.const 2)) (call $text (local.get $q) (i32.const 3))))
@@ -206,13 +204,10 @@
       (if (i32.eq (global.get $opt_driver) (i32.const 3)) (then
         (call $c_number) (local.set $result_n) (local.set $result)
         (if (global.get $opt_mysql_support) (then
-          (if (result i32 i32) (global.get $opt_mysql_strings) (then (call $c_string)) (else (call $c_number_string))) (local.set $result_n) (local.set $result)))))
-      (if (i32.and (i32.eq (global.get $opt_driver) (i32.const 5)) (i32.eqz (global.get $opt_mode_native))) (then
-        (call $c_number) (local.set $result_n) (local.set $result)))))))
+          (if (result i32 i32) (global.get $opt_mysql_strings) (then (call $c_string)) (else (call $c_number_string))) (local.set $result_n) (local.set $result)))))))))
   (if (i32.eq (local.get $cmd) (i32.const 6)) (then
     (call $runtime_import (local.get $m) (call $c_exec_result) (i32.const 1)) (local.set $result_n) (local.set $result)))
-  (local.set $sync (i32.or (i32.eq (global.get $opt_driver) (i32.const 5))
-    (i32.and (i32.eq (global.get $opt_driver) (i32.const 4)) (global.get $opt_mode_native))))
+  (local.set $sync (i32.ge_u (global.get $opt_driver) (i32.const 4)))
   (if (i32.eqz (local.get $sync)) (then (call $fmt1 (call $c_promise) (local.get $result) (local.get $result_n)) (local.set $result_n) (local.set $result)))
   (call $lemma_query_comments (local.get $q))
   (if (global.get $opt_lemmascript) (then

@@ -5,8 +5,10 @@ import assert from "node:assert/strict";
 const MEMORY_BYTES = 64 * 1024 * 1024;
 
 class Exit extends Error {
-  constructor(readonly status: number) {
+  readonly status: number;
+  constructor(status: number) {
     super(`guest exit ${status}`);
+    this.status = status;
   }
 }
 
@@ -21,11 +23,13 @@ export async function runPlugin(
   let inputOffset = 0,
     ioCalls = 0,
     outputBytes = 0;
-  const stdout: Buffer[] = [], stderr: Buffer[] = [];
+  const stdout: Buffer[] = [],
+    stderr: Buffer[] = [];
   const argv = ["sqlc-gen-typescript-native", ...args].map((s) =>
-    Buffer.from(`${s}\0`)
+    Buffer.from(`${s}\0`),
   );
-  const readChunk = io.readChunk ?? 65521, writeChunk = io.writeChunk ?? 65519;
+  const readChunk = io.readChunk ?? 65521,
+    writeChunk = io.writeChunk ?? 65519;
   function tick() {
     assert.ok(++ioCalls <= 100000, "guest made too many I/O calls");
   }
@@ -45,13 +49,15 @@ export async function runPlugin(
   }
   function get32(p: number) {
     range(p, 4);
-    return new DataView((instance.exports.memory as WebAssembly.Memory).buffer)
-      .getUint32(p >>> 0, true);
+    return new DataView(
+      (instance.exports.memory as WebAssembly.Memory).buffer,
+    ).getUint32(p >>> 0, true);
   }
   function put32(p: number, n: number) {
     range(p, 4);
-    new DataView((instance.exports.memory as WebAssembly.Memory).buffer)
-      .setUint32(p >>> 0, n, true);
+    new DataView(
+      (instance.exports.memory as WebAssembly.Memory).buffer,
+    ).setUint32(p >>> 0, n, true);
   }
   const imports = {
     args_sizes_get(argc: number, bytes: number) {
@@ -62,7 +68,10 @@ export async function runPlugin(
         return 0;
       }
       put32(argc, argv.length);
-      put32(bytes, argv.reduce((n, b) => n + b.length, 0));
+      put32(
+        bytes,
+        argv.reduce((n, b) => n + b.length, 0),
+      );
       return 0;
     },
     args_get(pointers: number, bytes: number) {
@@ -82,7 +91,8 @@ export async function runPlugin(
       if (io.readError) return 29;
       let total = 0;
       for (let i = 0; i < count && total < readChunk; i++) {
-        const p = get32(vectors + i * 8), n = get32(vectors + i * 8 + 4);
+        const p = get32(vectors + i * 8),
+          n = get32(vectors + i * 8 + 4);
         range(p, n);
         const copied = Math.min(
           n,
@@ -110,14 +120,16 @@ export async function runPlugin(
         return 0;
       }
       if (
-        (fd === 1 && io.stdoutOverreport) || (fd === 2 && io.stderrOverreport)
+        (fd === 1 && io.stdoutOverreport) ||
+        (fd === 2 && io.stderrOverreport)
       ) {
         put32(result, 0xffffffff);
         return 0;
       }
       let total = 0;
       for (let i = 0; i < count && total < writeChunk; i++) {
-        const p = get32(vectors + i * 8), n = get32(vectors + i * 8 + 4);
+        const p = get32(vectors + i * 8),
+          n = get32(vectors + i * 8 + 4);
         range(p, n);
         const copied = Math.min(n, writeChunk - total);
         outputBytes += copied;

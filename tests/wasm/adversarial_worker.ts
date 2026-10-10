@@ -1,32 +1,37 @@
-/// <reference lib="deno.worker" />
+import { parentPort } from "node:worker_threads";
+if (!parentPort) throw new Error("This module must run in a worker");
+const port = parentPort;
 // The parent owns the deadline, so it can stop an instruction-only Wasm loop.
 import { type IOOptions, runPlugin } from "./wasi_test_host.ts";
 import { errorMessage } from "./test_helpers.ts";
 
-type Message = { binary: Uint8Array } | {
-  request: Uint8Array;
-  args?: string[];
-  io?: IOOptions;
-};
+type Message =
+  | { binary: Uint8Array }
+  | {
+      request: Uint8Array;
+      args?: string[];
+      io?: IOOptions;
+    };
 let module: WebAssembly.Module | undefined;
-self.onmessage = async ({ data }: MessageEvent<Message>) => {
+port.on("message", async (data: Message) => {
   try {
     if ("binary" in data) {
       module = await WebAssembly.compile(new Uint8Array(data.binary));
-      self.postMessage({ ready: true });
+      port.postMessage({ ready: true });
     } else {
       if (!module) {
         throw new Error("Initialize the worker before sending requests");
       }
-      self.postMessage({
+      port.postMessage({
         result: await runPlugin(module, data.request, data.args, data.io),
       });
     }
   } catch (error) {
-    self.postMessage({
-      error: error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : errorMessage(error),
+    port.postMessage({
+      error:
+        error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : errorMessage(error),
     });
   }
-};
+});

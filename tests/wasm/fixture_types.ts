@@ -40,15 +40,10 @@ export interface Schema {
   enums?: Enum[];
 }
 
+// Options from supported historical cases, after filtering retired targets.
 export interface Options {
-  runtime: "node" | "bun" | "deno";
-  _driver_name:
-    | "pg"
-    | "postgres"
-    | "mysql2"
-    | "better-sqlite3"
-    | "@bonakodo/sqlite";
-  sqlite_type_mode?: string;
+  runtime: "node" | "bun";
+  _driver_name: "pg" | "postgres" | "mysql2" | "better-sqlite3";
   types_only?: boolean;
   emit_null_as_undefined?: boolean;
   optional_nullable_args?: boolean;

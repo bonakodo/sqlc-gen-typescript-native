@@ -1,3 +1,8 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import defaults from "./fixtures/sqlite-default-components.json" with { type: "json" };
+import { removedTarget, sqliteDefaultOptions } from "./test_helpers.ts";
 import { generateAssets } from "../../tools/assets.ts";
 import type { DriverField } from "./fixture_types.ts";
 import { Buffer } from "node:buffer";
@@ -10,7 +15,7 @@ import {
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT drivers", async () => {
+test("WAT drivers", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     driver: (
@@ -36,7 +41,7 @@ Deno.test("WAT drivers", async () => {
   }
   // Compare the drivers implementation with the frozen reference corpus.
   const corpusPath = new URL("./fixtures/drivers.json", import.meta.url);
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-driver-wat-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-driver-wat-"));
   let module: WebAssembly.Module;
   try {
     const assets = await generateAssets();
@@ -62,17 +67,18 @@ Deno.test("WAT drivers", async () => {
     ];
     const fragments = await Promise.all(
       names.map((name) =>
-        Deno.readTextFile(new URL(`../../src/${name}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${name}.wat`, import.meta.url), "utf8"),
       ),
     );
-    const core = await Deno.readTextFile(
+    const core = await readFile(
       new URL("../../src/core.wat", import.meta.url),
+      "utf8",
     );
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "test.wat"),
-      `(module\n${core}\n${assets}\n${legacyOutputHarness}\n${
-        fragments.join("\n")
-      }
+      `(module\n${core}\n${assets}\n${legacyOutputHarness}\n${fragments.join(
+        "\n",
+      )}
     (export "driver" (func $emit_driver_query))(export "options" (func $options_parse))
     (export "record" (func $work_record))(export "module" (func $module_new))(export "reserve" (func $reserve))
     (export "engine" (global $gen_engine))(export "work" (global $work_cursor))(export "text" (global $txt_cursor))
@@ -80,17 +86,17 @@ Deno.test("WAT drivers", async () => {
     (export "output" (global $out_cursor))(export "indent" (global $out_indent))
   )`,
     );
-    const compile = await command(wabt("wat2wasm"), [
-      join(directory, "test.wat"),
-      "-o",
-      join(directory, "test.wasm"),
-    ], { encoding: "utf8" });
+    const compile = await command(
+      wabt("wat2wasm"),
+      [join(directory, "test.wat"), "-o", join(directory, "test.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(compile.status, 0, compile.stderr);
     module = await WebAssembly.compile(
-      await Deno.readFile(join(directory, "test.wasm")),
+      await readFile(join(directory, "test.wasm")),
     );
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   const instance: WebAssembly.Instance = new WebAssembly.Instance(module, {
@@ -106,13 +112,11 @@ Deno.test("WAT drivers", async () => {
           (instance.exports.memory as WebAssembly.Memory).buffer,
         );
         throw new Error(
-          `Unexpected diagnostic: ${
-            Buffer.from(
-              view.buffer,
-              view.getUint32(p, true),
-              view.getUint32(p + 4, true),
-            )
-          }`,
+          `Unexpected diagnostic: ${Buffer.from(
+            view.buffer,
+            view.getUint32(p, true),
+            view.getUint32(p + 4, true),
+          )}`,
         );
       },
     },
@@ -124,7 +128,8 @@ Deno.test("WAT drivers", async () => {
     get = (p: number) => view.getUint32(p, true);
   let cursor: number;
   const put = (source: string) => {
-    const bytes = Buffer.from(source), p = cursor;
+    const bytes = Buffer.from(source),
+      p = cursor;
     memory.set(bytes, p);
     cursor += bytes.length + 1;
     return [p, bytes.length] as Pair;
@@ -163,7 +168,8 @@ Deno.test("WAT drivers", async () => {
     ":execresult": 6,
   };
   function fields(input: DriverField[]) {
-    let head = 0, last = 0;
+    let head = 0,
+      last = 0;
     for (const field of input) {
       const p = api.record(105);
       if (last) set(last + 4, p);
@@ -197,17 +203,22 @@ Deno.test("WAT drivers", async () => {
       a.Path < b.Path
         ? -1
         : a.Path > b.Path
-        ? 1
-        : a.Name < b.Name
-        ? -1
-        : a.Name > b.Name
-        ? 1
-        : 0
+          ? 1
+          : a.Name < b.Name
+            ? -1
+            : a.Name > b.Name
+              ? 1
+              : 0,
     );
   }
   let failures = 0;
-  const records = JSON.parse(await Deno.readTextFile(corpusPath));
+  const records = JSON.parse(await readFile(corpusPath, "utf8"));
+  let retired = 0;
   for (const [i, c] of records.entries()) {
+    if (removedTarget(c.Options)) {
+      retired++;
+      continue;
+    }
     cursor = 35000000;
     api.work.value = 40000000;
     api.text.value = 20971520;
@@ -215,7 +226,7 @@ Deno.test("WAT drivers", async () => {
     api.scopes.value = 0;
     api.output.value = 50331648;
     api.indent.value = c.Indent;
-    const [opts, n] = put(JSON.stringify(c.Options));
+    const [opts, n] = put(JSON.stringify(sqliteDefaultOptions(c.Options)));
     api.options(opts, n);
     api.engine.value =
       ({ sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>)[
@@ -246,9 +257,13 @@ Deno.test("WAT drivers", async () => {
     api.driver(m, plan, ...put(c.Bindings), ...put(c.SQL));
     const body = string(50331648, api.output.value - 50331648),
       after = imports(get(m + 20));
+    const expected = {
+      ...c,
+      ...((defaults.drivers as Record<string, unknown>)[i] as object),
+    };
     try {
-      assert.equal(body, c.Body);
-      assert.deepEqual(after, c.AfterImports);
+      assert.equal(body, expected.Body);
+      assert.deepEqual(after, expected.AfterImports);
       assert.equal(api.indent.value, c.Indent);
     } catch (_error) {
       failures++;
@@ -268,5 +283,9 @@ Deno.test("WAT drivers", async () => {
     }
   }
   assert.equal(failures, 0, `${failures} driver cases failed`);
-  console.log(`WAT drivers: ${records.length} exact body/import checks passed`);
+  console.log(
+    `WAT drivers: ${
+      records.length - retired
+    } exact body/import checks passed; ${retired} retired target cases`,
+  );
 });

@@ -1,9 +1,12 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
 import { command, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT core", async (t) => {
+test("WAT core", async (t) => {
   interface Exports {
     memory: WebAssembly.Memory;
     field: (
@@ -17,15 +20,16 @@ Deno.test("WAT core", async (t) => {
     write_all: (a0: number, a1: number, a2: number) => void;
   }
   // Tests for the hand-written WASI/protobuf core.
-  // Run: deno test -A tests/wasm/core_test.ts --
+  // Run: node --test tests/wasm/core_test.ts
 
-  const source = await Deno.readTextFile(
+  const source = await readFile(
     new URL("../../src/core.wat", import.meta.url),
+    "utf8",
   );
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-core-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-core-"));
   let module: WebAssembly.Module;
   try {
-    await Deno.writeTextFile(
+    await writeFile(
       join(directory, "core.wat"),
       `(module\n${source}\n
     (export "varint" (func $varint))
@@ -36,16 +40,18 @@ Deno.test("WAT core", async (t) => {
     (export "write_all" (func $write_all))
   )\n`,
     );
-    const compile = await command(wabt("wat2wasm"), [
-      join(directory, "core.wat"),
-      "-o",
-      join(directory, "core.wasm"),
-    ], { encoding: "utf8" });
+    const compile = await command(
+      wabt("wat2wasm"),
+      [join(directory, "core.wat"), "-o", join(directory, "core.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(compile.status, 0, `WAT did not compile:\n${compile.stderr}`);
-    const binary = await Deno.readFile(join(directory, "core.wasm"));
-    const decode = await command(wabt("wasm2wat"), [
-      join(directory, "core.wasm"),
-    ], { encoding: "utf8" });
+    const binary = await readFile(join(directory, "core.wasm"));
+    const decode = await command(
+      wabt("wasm2wat"),
+      [join(directory, "core.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(decode.status, 0, decode.stderr);
     assert.doesNotMatch(
       decode.stdout,
@@ -67,9 +73,9 @@ Deno.test("WAT core", async (t) => {
     );
     module = await WebAssembly.compile(binary);
     assert.deepEqual(
-      WebAssembly.Module.imports(module).map((
-        { module, name, kind },
-      ) => [module, name, kind]).sort(),
+      WebAssembly.Module.imports(module)
+        .map(({ module, name, kind }) => [module, name, kind])
+        .sort(),
       [
         ["wasi_snapshot_preview1", "fd_read", "function"],
         ["wasi_snapshot_preview1", "fd_write", "function"],
@@ -78,26 +84,26 @@ Deno.test("WAT core", async (t) => {
       "Only WASI byte transport and exit may come from the host",
     );
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   class Exit extends Error {
-    constructor(readonly code: number) {
+    readonly code: number;
+    constructor(code: number) {
       super(`WASI exit ${code}`);
+      this.code = code;
     }
   }
 
   // A deliberately small host implementation exposes short reads and writes.
   // It reads every iovec from the guest's actual memory, so bogus pointers fail.
-  function host(
-    {
-      input = Buffer.alloc(0),
-      readChunk = Infinity,
-      writeChunk = Infinity,
-      readErrno = 0,
-      writeErrno = 0,
-    } = {},
-  ) {
+  function host({
+    input = Buffer.alloc(0),
+    readChunk = Infinity,
+    writeChunk = Infinity,
+    readErrno = 0,
+    writeErrno = 0,
+  } = {}) {
     let consumed = 0;
     const output: Buffer[][] = [[], [], []];
     const imports = {
@@ -174,7 +180,7 @@ Deno.test("WAT core", async (t) => {
   const base = 33554432;
   const inputCapacity = 16777216;
   async function test(name: string, fn: () => void) {
-    await t.step(name, fn);
+    await t.test(name, fn);
   }
   function rejected(fn: () => unknown, h: ReturnType<typeof host>) {
     assert.throws(
@@ -214,21 +220,20 @@ Deno.test("WAT core", async (t) => {
   ) => [...tag(number, 2), ...varint(bytes.length), ...bytes];
 
   await test("varints preserve the full unsigned 64-bit range", () => {
-    for (
-      const value of [
-        0n,
-        1n,
-        127n,
-        128n,
-        16383n,
-        16384n,
-        (1n << 32n) - 1n,
-        1n << 32n,
-        1n << 63n,
-        (1n << 64n) - 1n,
-      ] as const
-    ) {
-      const bytes = varint(value), h = withBytes(bytes);
+    for (const value of [
+      0n,
+      1n,
+      127n,
+      128n,
+      16383n,
+      16384n,
+      (1n << 32n) - 1n,
+      1n << 32n,
+      1n << 63n,
+      (1n << 64n) - 1n,
+    ] as const) {
+      const bytes = varint(value),
+        h = withBytes(bytes);
       const [next, actual] = h.api.varint(base, base + bytes.length);
       assert.equal(next, base + bytes.length);
       assert.equal(BigInt.asUintN(64, actual), value);
@@ -239,26 +244,26 @@ Deno.test("WAT core", async (t) => {
     assert.deepEqual(h.api.varint(base, base + 2), [base + 2, 0n]);
   });
   await test("truncated and overflowing varints fail cleanly", () => {
-    for (
-      const bytes of [[], [0x80], Array(10).fill(0x80), [
-        ...Array(9).fill(0xff),
-        2,
-      ], [...Array(10).fill(0xff), 0]] as const
-    ) {
+    for (const bytes of [
+      [],
+      [0x80],
+      Array(10).fill(0x80),
+      [...Array(9).fill(0xff), 2],
+      [...Array(10).fill(0xff), 0],
+    ] as const) {
       const h = withBytes(bytes);
       rejected(() => h.api.varint(base, base + bytes.length), h);
     }
   });
   await test("scalar fields expose varints and skip fixed-width unknown fields", () => {
-    for (
-      const [number, wire, payload, value] of [
-        [1, 0, varint(150), 150n],
-        [536870911, 0, varint((1n << 64n) - 1n), (1n << 64n) - 1n],
-        [21, 1, [8, 7, 6, 5, 4, 3, 2, 1], 0n],
-        [22, 5, [4, 3, 2, 1], 0n],
-      ] as const
-    ) {
-      const bytes = [...tag(number, wire), ...payload], h = withBytes(bytes);
+    for (const [number, wire, payload, value] of [
+      [1, 0, varint(150), 150n],
+      [536870911, 0, varint((1n << 64n) - 1n), (1n << 64n) - 1n],
+      [21, 1, [8, 7, 6, 5, 4, 3, 2, 1], 0n],
+      [22, 5, [4, 3, 2, 1], 0n],
+    ] as const) {
+      const bytes = [...tag(number, wire), ...payload],
+        h = withBytes(bytes);
       const result = h.api.field(base, base + bytes.length);
       assert.equal(result[0], base + bytes.length);
       assert.equal(result[1], number);
@@ -267,10 +272,13 @@ Deno.test("WAT core", async (t) => {
     }
   });
   await test("length-delimited fields borrow input bytes without changing them", () => {
-    for (
-      const bytes of [[], [0, 255, 34], [...Buffer.from("日本語")]] as const
-    ) {
-      const wire = lengthField(5, bytes), h = withBytes(wire);
+    for (const bytes of [
+      [],
+      [0, 255, 34],
+      [...Buffer.from("日本語")],
+    ] as const) {
+      const wire = lengthField(5, bytes),
+        h = withBytes(wire);
       const [next, number, kind, , pointer, length] = h.api.field(
         base,
         base + wire.length,
@@ -312,11 +320,10 @@ Deno.test("WAT core", async (t) => {
     ];
     const h = withBytes(bytes);
     const [pointer, length] = h.api.find(base, bytes.length, 5);
-    assert.deepEqual([...h.bytes.subarray(pointer, pointer + length)], [
-      3,
-      4,
-      5,
-    ]);
+    assert.deepEqual(
+      [...h.bytes.subarray(pointer, pointer + length)],
+      [3, 4, 5],
+    );
     assert.deepEqual(h.api.find(base, bytes.length, 7), [0, 0]);
   });
   await test("unknown groups require matching closing tags", () => {
@@ -326,12 +333,10 @@ Deno.test("WAT core", async (t) => {
       h.api.field(base, base + valid.length)[0],
       base + valid.length,
     );
-    for (
-      const bytes of [[...tag(100, 3)], [
-        ...tag(100, 3),
-        ...tag(99, 4),
-      ]] as const
-    ) {
+    for (const bytes of [
+      [...tag(100, 3)],
+      [...tag(100, 3), ...tag(99, 4)],
+    ] as const) {
       const bad = withBytes(bytes);
       rejected(() => bad.api.field(base, base + bytes.length), bad);
     }
@@ -502,13 +507,8 @@ Deno.test("WAT core", async (t) => {
             skip(inner, kind, depth + 1);
           }
         }
-        const size = wire === 1
-          ? 8n
-          : wire === 5
-          ? 4n
-          : wire === 2
-          ? readVarint()
-          : -1n;
+        const size =
+          wire === 1 ? 8n : wire === 5 ? 4n : wire === 2 ? readVarint() : -1n;
         if (size < 0n || size > BigInt(bytes.length - p)) {
           throw new Error("length");
         }
@@ -525,7 +525,7 @@ Deno.test("WAT core", async (t) => {
         bytes = Uint8Array.from({ length: random() % 48 }, random);
       } else {
         const payload = Uint8Array.from({ length: random() % 30 }, random);
-        bytes = Uint8Array.from(lengthField(1 + random() % 100000, payload));
+        bytes = Uint8Array.from(lengthField(1 + (random() % 100000), payload));
         if (i % 3 === 0) bytes[random() % bytes.length] = random();
       }
       let expected;
@@ -537,11 +537,13 @@ Deno.test("WAT core", async (t) => {
       h.bytes.set(bytes, base);
       if (expected === null) {
         rejected(() => h.api.field(base, base + bytes.length), h);
-      } else {assert.equal(
+      } else {
+        assert.equal(
           h.api.field(base, base + bytes.length)[0],
           base + expected,
           `wire case ${i}: ${Buffer.from(bytes).toString("hex")}`,
-        );}
+        );
+      }
     }
   });
 });

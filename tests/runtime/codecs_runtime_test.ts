@@ -1,6 +1,7 @@
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspect } from "node:util";
-import { Database } from "@bonakodo/sqlite";
+import { DatabaseSync as Database } from "node:sqlite";
 import {
   createJsonTextCodec,
   decodeCustom,
@@ -29,7 +30,7 @@ const context: CodecContext = {
   expectedType: "Date",
 };
 
-Deno.test("codec type arguments reject mismatched application types", () => {
+test("codec type arguments reject mismatched application types", () => {
   const invalidCalls = () => {
     // @ts-expect-error A number codec cannot produce the configured string type.
     encodeCustom<string>(safeInteger, "value", false);
@@ -57,8 +58,8 @@ Deno.test("codec type arguments reject mismatched application types", () => {
 function codecError(
   operation: () => unknown,
   phase: "encode" | "decode",
-  errorType: typeof QueryCodecError | typeof server.QueryCodecError =
-    QueryCodecError,
+  errorType:
+    typeof QueryCodecError | typeof server.QueryCodecError = QueryCodecError,
 ) {
   let error: unknown;
   try {
@@ -78,16 +79,14 @@ function codecError(
   return error;
 }
 
-Deno.test("safe integer codec rejects rounded and out-of-range values", () => {
-  for (
-    const value of [
-      0,
-      -1,
-      2 ** 32,
-      Number.MAX_SAFE_INTEGER,
-      Number.MIN_SAFE_INTEGER,
-    ]
-  ) {
+test("safe integer codec rejects rounded and out-of-range values", () => {
+  for (const value of [
+    0,
+    -1,
+    2 ** 32,
+    Number.MAX_SAFE_INTEGER,
+    Number.MIN_SAFE_INTEGER,
+  ]) {
     assert.equal(safeInteger.encode(value), BigInt(value));
     assert.equal(safeInteger.decode(BigInt(value)), value);
     assert.equal(safeInteger.decode(value), value);
@@ -101,7 +100,7 @@ Deno.test("safe integer codec rejects rounded and out-of-range values", () => {
   }
 });
 
-Deno.test("epoch milliseconds retain Date precision and validate Date's bounds", () => {
+test("epoch milliseconds retain Date precision and validate Date's bounds", () => {
   for (const time of [0, -1, 1_788_688_139_074, 8_640_000_000_000_000]) {
     assert.equal(epochMilliseconds.encode(new Date(time)), BigInt(time));
     assert.equal(epochMilliseconds.decode(BigInt(time)).getTime(), time);
@@ -111,7 +110,7 @@ Deno.test("epoch milliseconds retain Date precision and validate Date's bounds",
   assert.throws(() => epochMilliseconds.decode("2026-09-08"));
 });
 
-Deno.test("SQLite boolean codec accepts only the two stored boolean values", () => {
+test("SQLite boolean codec accepts only the two stored boolean values", () => {
   assert.equal(sqliteBoolean.encode(true), 1);
   assert.equal(sqliteBoolean.encode(false), 0);
   for (const value of [0, 0n]) assert.equal(sqliteBoolean.decode(value), false);
@@ -121,7 +120,7 @@ Deno.test("SQLite boolean codec accepts only the two stored boolean values", () 
   }
 });
 
-Deno.test("JSON text preserves parsed JSON and distinguishes JSON null from SQL NULL", () => {
+test("JSON text preserves parsed JSON and distinguishes JSON null from SQL NULL", () => {
   const value = { text: "日本語", nested: [null, true, { count: 4 }] };
   assert.deepEqual(jsonText.decode(jsonText.encode(value)), value);
   assert.equal(encodeCustom(jsonText, null, false), "null");
@@ -133,21 +132,30 @@ Deno.test("JSON text preserves parsed JSON and distinguishes JSON null from SQL 
   assert.throws(() => decodeCustom(jsonText, null, false, false));
   const cyclic: { self?: unknown } = {};
   cyclic.self = cyclic;
-  for (
-    const invalid of [undefined, NaN, Infinity, 1n, new Date(), [undefined], {
+  for (const invalid of [
+    undefined,
+    NaN,
+    Infinity,
+    1n,
+    new Date(),
+    [undefined],
+    {
       absent: undefined,
-    }, cyclic]
-  ) {
+    },
+    cyclic,
+  ]) {
     assert.throws(() => jsonText.encode(invalid));
   }
   assert.throws(() => jsonText.decode("1e400"));
   assert.throws(() => jsonText.decode(new Uint8Array()));
 });
 
-Deno.test("JSON parser codecs validate application values on writes and reads", () => {
+test("JSON parser codecs validate application values on writes and reads", () => {
   const codec = createJsonTextCodec((value) => {
     if (
-      typeof value !== "object" || value === null || !("name" in value) ||
+      typeof value !== "object" ||
+      value === null ||
+      !("name" in value) ||
       typeof value.name !== "string"
     ) {
       throw new Error("Application parser rejected a document");
@@ -164,7 +172,7 @@ Deno.test("JSON parser codecs validate application values on writes and reads", 
   );
 });
 
-Deno.test("SQLite conversion errors attach source metadata without exposing values", () => {
+test("SQLite conversion errors attach source metadata without exposing values", () => {
   const secret = "medical-fixture-do-not-log";
   codecError(() => encodeValue("date", secret, false, context), "encode");
   codecError(() => encodeValue("date", null, false, context), "encode");
@@ -176,15 +184,12 @@ Deno.test("SQLite conversion errors attach source metadata without exposing valu
     () => decodeCustom(epochMilliseconds, secret, false, false, context),
     "decode",
   );
-  for (
-    const text of [
-      error.message,
-      error.stack,
-      JSON.stringify(error),
-      inspect(error),
-      Deno.inspect(error),
-    ]
-  ) {
+  for (const text of [
+    error.message,
+    error.stack,
+    JSON.stringify(error),
+    inspect(error),
+  ]) {
     assert(!text?.includes(secret));
   }
   const jsonError = codecError(
@@ -194,7 +199,7 @@ Deno.test("SQLite conversion errors attach source metadata without exposing valu
   assert(!inspect(jsonError.originalCause()).includes(secret));
 });
 
-Deno.test("custom codec causes remain available only through explicit access", () => {
+test("custom codec causes remain available only through explicit access", () => {
   const secret = "medical-fixture-do-not-log";
   const cause = new Error(secret, { cause: { body: secret } });
   const codec = {
@@ -205,9 +210,10 @@ Deno.test("custom codec causes remain available only through explicit access", (
       throw cause;
     },
   };
-  for (
-    const runtime of [{ encodeCustom, decodeCustom, QueryCodecError }, server]
-  ) {
+  for (const runtime of [
+    { encodeCustom, decodeCustom, QueryCodecError },
+    server,
+  ]) {
     const encodeError = codecError(
       () => runtime.encodeCustom(codec, secret, false, context),
       "encode",
@@ -222,13 +228,13 @@ Deno.test("custom codec causes remain available only through explicit access", (
       assert.equal(error.originalCause(), cause);
       assert(error.cause instanceof Error);
       assert(!inspect(error).includes(secret));
-      assert(!Deno.inspect(error).includes(secret));
+      assert(!inspect(error).includes(secret));
       assert(!JSON.stringify(error).includes(secret));
     }
   }
 });
 
-Deno.test("server scalar and array conversions carry the same safe context", () => {
+test("server scalar and array conversions carry the same safe context", () => {
   codecError(
     () => server.encodeValue("date", "bad", false, context),
     "encode",
@@ -275,7 +281,7 @@ Deno.test("server scalar and array conversions carry the same safe context", () 
   );
 });
 
-Deno.test("SQL slices validate their outer array and preserve element context", () => {
+test("SQL slices validate their outer array and preserve element context", () => {
   codecError(
     () =>
       encodeSlice(
@@ -285,7 +291,10 @@ Deno.test("SQL slices validate their outer array and preserve element context", 
       ),
     "encode",
   );
-  assert.deepEqual(encodeSlice([], (value) => value, context), []);
+  assert.deepEqual(
+    encodeSlice([], (value) => value, context),
+    [],
+  );
   const original = new Error("medical-fixture-do-not-log");
   const codec = {
     encode() {
@@ -308,26 +317,34 @@ Deno.test("SQL slices validate their outer array and preserve element context", 
   assert(!inspect(error).includes(original.message));
 });
 
-Deno.test("built-in codecs roundtrip their intended SQLite storage classes", () => {
+test("built-in codecs roundtrip their intended SQLite storage classes", () => {
   using db = new Database(":memory:");
   db.exec(
     "CREATE TABLE records (counter INTEGER, happened_at INTEGER, enabled INTEGER, payload TEXT)",
   );
-  using insert = db.prepare("INSERT INTO records VALUES (?, ?, ?, ?)");
+  const insert = db.prepare("INSERT INTO records VALUES (?, ?, ?, ?)");
   const now = new Date("2026-09-08T01:02:03.456Z");
-  insert.run([
-    encodeCustom(safeInteger, 2 ** 40, false, context),
-    encodeCustom(epochMilliseconds, now, false, context),
-    encodeCustom(sqliteBoolean, true, false, context),
-    encodeCustom(jsonText, { valid: true }, false, context),
-  ]);
-  using select = db.prepare(
+  insert.run(
+    ...[
+      encodeCustom(safeInteger, 2 ** 40, false, context),
+      encodeCustom(epochMilliseconds, now, false, context),
+      encodeCustom(sqliteBoolean, true, false, context),
+      encodeCustom(jsonText, { valid: true }, false, context),
+    ],
+  );
+  const select = db.prepare(
     "SELECT counter, happened_at, enabled, payload FROM records",
-  ).safeIntegers();
-  const row = select.raw().get();
+  );
+  select.setReadBigInts(true);
+  select.setReturnArrays(true);
+  const row = select.get() as unknown as
+    (null | string | number | bigint | Uint8Array)[] | undefined;
   assert(
-    row && row[0] !== undefined && row[1] !== undefined &&
-      row[2] !== undefined && row[3] !== undefined,
+    row &&
+      row[0] !== undefined &&
+      row[1] !== undefined &&
+      row[2] !== undefined &&
+      row[3] !== undefined,
   );
   assert.equal(
     decodeCustom(safeInteger, row[0], false, false, context),
@@ -344,13 +361,9 @@ Deno.test("built-in codecs roundtrip their intended SQLite storage classes", () 
   assert.deepEqual(decodeCustom(jsonText, row[3], false, false, context), {
     valid: true,
   });
-  using storage = db.prepare(
+  const storage = db.prepare(
     "SELECT typeof(counter), typeof(happened_at), typeof(enabled), typeof(payload) FROM records",
   );
-  assert.deepEqual(storage.raw().get(), [
-    "integer",
-    "integer",
-    "integer",
-    "text",
-  ]);
+  storage.setReturnArrays(true);
+  assert.deepEqual(storage.get(), ["integer", "integer", "integer", "text"]);
 });

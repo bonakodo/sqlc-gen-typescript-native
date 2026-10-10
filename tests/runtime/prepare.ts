@@ -1,5 +1,6 @@
+import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
 /** Produce the modules under test through the real WASM generator. */
-import { assert, assertEquals } from "@std/assert";
+import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { runPlugin } from "../wasm/wasi_test_host.ts";
 
@@ -43,50 +44,57 @@ function request(engine: string, driver: string): Buffer {
       ...(array ? [integerField(4, 1), integerField(17, 1)] : []),
       ...(slice ? [integerField(13, 1)] : []),
     ]);
-    const parameter = engine === "postgresql"
-      ? "$1"
-      : slice
-      ? "/*SLICE:value*/?"
-      : "?";
-    queries.push(Buffer.concat([
-      field(1, `SELECT ${parameter} AS value`),
-      field(2, name),
-      field(3, command),
-      field(4, column),
-      field(5, Buffer.concat([integerField(1, 1), field(2, column)])),
-      field(7, "query.sql"),
-    ]));
+    const parameter =
+      engine === "postgresql" ? "$1" : slice ? "/*SLICE:value*/?" : "?";
+    queries.push(
+      Buffer.concat([
+        field(1, `SELECT ${parameter} AS value`),
+        field(2, name),
+        field(3, command),
+        field(4, column),
+        field(5, Buffer.concat([integerField(1, 1), field(2, column)])),
+        field(7, "query.sql"),
+      ]),
+    );
   }
-  const kinds = engine === "sqlite"
-    ? ["INTEGER", "REAL", "BOOLEAN", "DATE", "BLOB", "JSON", "TEXT", "custom"]
-    : engine === "postgresql"
-    ? [
-      "int4",
-      "text",
-      "bool",
-      "timestamptz",
-      "bytea",
-      "jsonb",
-      "point",
-      "circle",
-      "box",
-      "custom",
-    ]
-    : ["int", "bigint", "text", "bool", "datetime", "blob", "json", "custom"];
+  const kinds =
+    engine === "sqlite"
+      ? ["INTEGER", "REAL", "BOOLEAN", "DATE", "BLOB", "JSON", "TEXT", "custom"]
+      : engine === "postgresql"
+        ? [
+            "int4",
+            "text",
+            "bool",
+            "timestamptz",
+            "bytea",
+            "jsonb",
+            "point",
+            "circle",
+            "box",
+            "custom",
+          ]
+        : [
+            "int",
+            "bigint",
+            "text",
+            "bool",
+            "datetime",
+            "blob",
+            "json",
+            "custom",
+          ];
   for (const [index, type] of kinds.entries()) {
     echo(`Scalar${index}`, type);
     if (engine === "postgresql") echo(`Array${index}`, type, true);
   }
   if (engine === "sqlite") {
     echo("Many", "INTEGER", false, false, ":many");
-    for (
-      const [index, preset] of [
-        "safe_integer",
-        "epoch_milliseconds",
-        "sqlite_boolean",
-        "json_text",
-      ].entries()
-    ) {
+    for (const [index, preset] of [
+      "safe_integer",
+      "epoch_milliseconds",
+      "sqlite_boolean",
+      "json_text",
+    ].entries()) {
       const query = `Preset${index}`;
       echo(query, preset === "json_text" ? "TEXT" : "INTEGER");
       queryOverrides.push(
@@ -109,17 +117,17 @@ function request(engine: string, driver: string): Buffer {
     }
   }
   if (engine !== "postgresql") echo("Slice", "INTEGER", false, true);
-  for (
-    const command of engine === "postgresql"
-      ? [":execresult"]
-      : [":execlastid", ":execresult"]
-  ) {
-    queries.push(Buffer.concat([
-      field(1, "INSERT INTO entries DEFAULT VALUES"),
-      field(2, command === ":execlastid" ? "InsertID" : "InsertResult"),
-      field(3, command),
-      field(7, "query.sql"),
-    ]));
+  for (const command of engine === "postgresql"
+    ? [":execresult"]
+    : [":execlastid", ":execresult"]) {
+    queries.push(
+      Buffer.concat([
+        field(1, "INSERT INTO entries DEFAULT VALUES"),
+        field(2, command === ":execlastid" ? "InsertID" : "InsertResult"),
+        field(3, command),
+        field(7, "query.sql"),
+      ]),
+    );
   }
   return Buffer.concat([
     field(1, field(2, engine)),
@@ -129,8 +137,7 @@ function request(engine: string, driver: string): Buffer {
       5,
       JSON.stringify({
         driver,
-        runtime: "deno",
-        ...(engine === "sqlite" ? { sqlite_type_mode: "native" } : {}),
+        runtime: "node",
         ...(engine === "mysql"
           ? { mysql2: { support_big_numbers: true, big_number_strings: false } }
           : {}),
@@ -158,7 +165,7 @@ function fields(bytes: Uint8Array): [number, Uint8Array][] {
   const result: [number, Uint8Array][] = [];
   while (offset < bytes.length) {
     const tag = uint();
-    assertEquals(tag % 8, 2, "unexpected response wire type");
+    assert.deepEqual(tag % 8, 2, "unexpected response wire type");
     const size = uint();
     assert(size <= bytes.length - offset, "truncated response field");
     result.push([Math.floor(tag / 8), bytes.subarray(offset, offset + size)]);
@@ -167,51 +174,51 @@ function fields(bytes: Uint8Array): [number, Uint8Array][] {
   return result;
 }
 
-const binary = await Deno.readFile(
+const binary = await readFile(
   new URL("../../bin/sqlc-gen-typescript-native.wasm", import.meta.url),
 );
 const module = await WebAssembly.compile(binary);
 const output = new URL("./.generated/", import.meta.url);
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
-for (
-  const [name, engine, driver] of [
-    ["sqlite", "sqlite", "@bonakodo/sqlite"],
-    ["server", "postgresql", "pg"],
-    ["postgres", "postgresql", "postgres"],
-    ["mysql", "mysql", "mysql2"],
-  ] as const
-) {
+for (const [name, engine, driver] of [
+  ["sqlite", "sqlite", "node:sqlite"],
+  ["node-sqlite", "sqlite", "node:sqlite"],
+  ["server", "postgresql", "pg"],
+  ["postgres", "postgresql", "postgres"],
+  ["mysql", "mysql", "mysql2"],
+] as const) {
   const generated = await runPlugin(module, request(engine, driver));
-  assertEquals(generated.status, 0, generated.stderr.toString());
-  assertEquals(generated.stderr.length, 0);
+  assert.deepEqual(generated.status, 0, generated.stderr.toString());
+  assert.deepEqual(generated.stderr.length, 0);
   const files = new Map<string, Uint8Array>();
   for (const [number, body] of fields(generated.stdout)) {
-    assertEquals(number, 1);
+    assert.deepEqual(number, 1);
     const file = fields(body);
-    assertEquals(file.map(([number]) => number), [1, 2]);
+    assert.deepEqual(
+      file.map(([number]) => number),
+      [1, 2],
+    );
     const filename = utf8.decode(file[0]![1]);
     assert(!files.has(filename), `duplicate generated file: ${filename}`);
     files.set(filename, file[1]![1]);
   }
   const directory = new URL(`${name}/`, output);
-  await Deno.remove(directory, { recursive: true }).catch((error) => {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  await rm(directory, { recursive: true }).catch((error) => {
+    if (!((error as NodeJS.ErrnoException).code === "ENOENT")) throw error;
   });
-  await Deno.mkdir(directory, { recursive: true });
-  for (
-    const filename of [
-      "codec_error.ts",
-      "json.ts",
-      "runtime_common.ts",
-      `runtime_${engine}.ts`,
-    ]
-  ) {
+  await mkdir(directory, { recursive: true });
+  for (const filename of [
+    "codec_error.ts",
+    "json.ts",
+    "runtime_common.ts",
+    `runtime_${engine}.ts`,
+  ]) {
     const contents = files.get(filename);
     assert(contents, `missing generated support file: ${filename}`);
     // A malformed UTF-8 response must not become a silently repaired fixture.
     utf8.decode(contents);
-    await Deno.writeFile(new URL(filename, directory), contents);
+    await writeFile(new URL(filename, directory), contents);
   }
   console.log(`Prepared ${name} runtime from WASM (${driver})`);
 }

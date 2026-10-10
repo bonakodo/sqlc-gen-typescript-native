@@ -1,29 +1,46 @@
+import { test } from "node:test";
 import { join } from "node:path";
 import { generate, type Options, output } from "./generation_helpers.ts";
 
-Deno.test("stock sqlc generates live PostgreSQL and MySQL fixtures", async () => {
+test("stock sqlc generates live PostgreSQL and MySQL fixtures", async () => {
   const variants: [string, string, Options?][] = [
     ["pg", "pg"],
     ["postgres", "postgres"],
     ["mysql2", "mysql2"],
-    ["mysql2-mixed", "mysql2", {
-      support_big_numbers: true,
-      big_number_strings: false,
-    }],
-    ["mysql2-strings", "mysql2", {
-      support_big_numbers: true,
-      big_number_strings: true,
-    }],
-    ["mysql2-signed", "mysql2", {
-      support_big_numbers: true,
-      big_number_strings: true,
-      insert_id_unsigned: false,
-    }],
-    ["mysql2-unsigned", "mysql2", {
-      support_big_numbers: true,
-      big_number_strings: true,
-      insert_id_unsigned: true,
-    }],
+    [
+      "mysql2-mixed",
+      "mysql2",
+      {
+        support_big_numbers: true,
+        big_number_strings: false,
+      },
+    ],
+    [
+      "mysql2-strings",
+      "mysql2",
+      {
+        support_big_numbers: true,
+        big_number_strings: true,
+      },
+    ],
+    [
+      "mysql2-signed",
+      "mysql2",
+      {
+        support_big_numbers: true,
+        big_number_strings: true,
+        insert_id_unsigned: false,
+      },
+    ],
+    [
+      "mysql2-unsigned",
+      "mysql2",
+      {
+        support_big_numbers: true,
+        big_number_strings: true,
+        insert_id_unsigned: true,
+      },
+    ],
   ];
   await generate(
     join(output, "live"),

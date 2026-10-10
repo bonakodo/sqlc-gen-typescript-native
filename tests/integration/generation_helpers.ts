@@ -1,3 +1,5 @@
+import { command as execute } from "../wasm/test_helpers.ts";
+import { readFile, writeFile, mkdir, stat, readdir } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, relative } from "node:path";
@@ -5,46 +7,47 @@ import { join, relative } from "node:path";
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const output = fileURLToPath(new URL("./.generated/", import.meta.url));
 const pinnedSqlc = join(root, "bin/.tools/sqlc-1.31.1/sqlc");
-export const sqlc = Deno.env.get("SQLC") ??
-  (await Deno.stat(pinnedSqlc).then(() => pinnedSqlc).catch(() => "sqlc"));
+export const sqlc =
+  process.env["SQLC"] ??
+  (await stat(pinnedSqlc)
+    .then(() => pinnedSqlc)
+    .catch(() => "sqlc"));
 export type Options = Record<string, unknown>;
 
 export async function run(command: string, args: string[]) {
-  const result = await new Deno.Command(command, {
-    cwd: root,
-    args,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
+  const result = await execute(command, args, { cwd: root });
   assert.equal(
-    result.code,
+    result.status,
     0,
-    `${command} ${args.join(" ")}\n${new TextDecoder().decode(result.stdout)}${
-      new TextDecoder().decode(result.stderr)
-    }`,
+    `${command} ${args.join(" ")}\n${result.stdout}${result.stderr}`,
   );
   return result;
 }
 
 export async function plugins() {
-  return await Promise.all(["wasm", "raw"].map(async (name) => {
-    const path = join(
-      root,
-      "bin",
-      `sqlc-gen-typescript-native${name === "raw" ? ".raw" : ""}.wasm`,
-    );
-    const bytes = await Deno.readFile(path);
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-    const sha256 = [...digest].map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-    return { name, wasm: { url: pathToFileURL(path).href, sha256 } };
-  }));
+  return await Promise.all(
+    ["wasm", "raw"].map(async (name) => {
+      const path = join(
+        root,
+        "bin",
+        `sqlc-gen-typescript-native${name === "raw" ? ".raw" : ""}.wasm`,
+      );
+      const bytes = await readFile(path);
+      const digest = new Uint8Array(
+        await crypto.subtle.digest("SHA-256", bytes),
+      );
+      const sha256 = [...digest]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      return { name, wasm: { url: pathToFileURL(path).href, sha256 } };
+    }),
+  );
 }
 
 export async function generate(directory: string, sql: unknown[]) {
-  await Deno.mkdir(directory, { recursive: true });
+  await mkdir(directory, { recursive: true });
   const config = join(directory, "sqlc.json");
-  await Deno.writeTextFile(
+  await writeFile(
     config,
     JSON.stringify({ version: "2", plugins: await plugins(), sql }, null, 2),
   );
@@ -75,18 +78,16 @@ export async function files(
   directory: string,
 ): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
-  for await (const entry of Deno.readDir(directory)) {
-    if (entry.isDirectory) {
-      for (
-        const [name, source] of Object.entries(
-          await files(join(directory, entry.name)),
-        )
-      ) {
+  for await (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      for (const [name, source] of Object.entries(
+        await files(join(directory, entry.name)),
+      )) {
         result[join(entry.name, name)] = source;
       }
     } else {
       result[entry.name] = new TextDecoder("utf-8", { fatal: true }).decode(
-        await Deno.readFile(join(directory, entry.name)),
+        await readFile(join(directory, entry.name)),
       );
     }
   }
@@ -102,3 +103,25 @@ export async function compareBuilds(directory: string) {
   );
   return optimized;
 }
+
+// Keep generated-code checks strict, including checks of deliberately invalid modules.
+export const typecheckArgs = [
+  "--ignoreConfig",
+  "--noEmit",
+  "--allowImportingTsExtensions",
+  "--module",
+  "NodeNext",
+  "--moduleResolution",
+  "NodeNext",
+  "--target",
+  "ES2023",
+  "--strict",
+  "--noUnusedLocals",
+  "--noUnusedParameters",
+  "--noUncheckedIndexedAccess",
+  "--exactOptionalPropertyTypes",
+  "--verbatimModuleSyntax",
+  "--types",
+  "node",
+];
+export const tsc = join(root, "node_modules/typescript/bin/tsc");

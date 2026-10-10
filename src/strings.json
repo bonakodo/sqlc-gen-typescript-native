@@ -123,15 +123,13 @@
   "root_factory_method": "%s: %s(%s),",
   "proto_name": "__proto__",
   "proto_property": "[\"__proto__\"]",
-  "client_pg": "%simport type { QueryArrayConfig, QueryArrayResult } from %s;\n\nexport interface Database {\n  query(config: QueryArrayConfig): Promise<QueryArrayResult>;\n}\n\n",
-  "client_pg_deno": "// @deno-types=\"@types/pg\"\n",
+  "client_pg": "import type { QueryArrayConfig, QueryArrayResult } from %s;\n\nexport interface Database {\n  query(config: QueryArrayConfig): Promise<QueryArrayResult>;\n}\n\n",
   "client_postgres": "import type { Sql } from %s;\n\nexport type Database = Pick<Sql, \"unsafe\">;\nexport type DriverParameters = NonNullable<Parameters<Sql[\"unsafe\"]>[1]>;\n\n",
   "client_mysql": "import type { Connection } from %s;\n\nexport type Database = Pick<Connection, \"execute\">;\n\n",
-  "client_better": "%simport type { Database } from %s;\nexport type { Database };\n",
-  "client_better_deno": "// @deno-types=\"@types/better-sqlite3\"\n",
+  "client_better": "import type { Database } from %s;\nexport type { Database };\n",
   "json_generic": "const jsonDriver: string = \"generic\";\n\n",
   "json_postgres": "const jsonDriver: string = \"postgres\";\n\n",
-  "client_bonakodo": "import type { Database } from %s;\nexport type { Database };\n\n",
+  "client_node_sqlite": "import type { DatabaseSync as Database } from %s;\nexport type { Database };\n\n",
   "compact_file": "query_helpers.ts",
   "compact_path": "./query_helpers.ts",
   "compact_common_file": "runtime_common.ts",
@@ -196,5 +194,6 @@
   "lemma_factory": "// LemmaScript: contracts belong to the named query functions; this factory only binds the connection.",
   "lemma_embed": "//@ contract Embedded result %s has TypeScript type %s; child fields describe decoding and outer-join null handling.",
   "lemma_row": "row",
-  "lemma_async": "//@ contract Async result: the TypeScript return is a Promise. LemmaScript 0.6.1 does not unwrap external Promise results or model await; resolved-row postconditions need a separate model."
+  "lemma_async": "//@ contract Async result: the TypeScript return is a Promise. LemmaScript 0.6.1 does not unwrap external Promise results or model await; resolved-row postconditions need a separate model.",
+  "client_bun_sqlite": "import type { Database } from %s;\nexport type { Database };\n\n"
 }

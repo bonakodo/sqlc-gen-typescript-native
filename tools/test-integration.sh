@@ -7,24 +7,23 @@ if [ -z "${SQLC:-}" ] && [ -x "$PWD/bin/.tools/sqlc-1.31.1/sqlc" ]; then
 fi
 SQLC=${SQLC:-sqlc}
 export SQLC
-npm ci --prefix tests/integration
 tools/build.sh
-deno run --allow-read --allow-write tests/runtime/prepare.ts
+"${NODE:-node}" tests/runtime/prepare.ts
 rm -rf tests/integration/.generated
-deno test --config tests/integration/deno.json --allow-read --allow-write --allow-env=SQLC --allow-run \
+"${NODE:-node}" --test --test-concurrency=1 \
   tests/integration/generate_test.ts tests/integration/large_schema_test.ts tests/integration/codec_types_test.ts \
   tests/integration/compact_output_test.ts tests/integration/bindings_execution_test.ts \
   tests/integration/execution_helpers_test.ts tests/integration/stable_names_test.ts \
   tests/integration/lemmascript_test.ts
-deno lint --no-config --rules-tags= --rules-include=no-import-prefix tests/integration/.generated/deno-*/wasm/*.ts
-deno check --config tests/integration/deno.json tests/integration/.generated/*/wasm/*.ts \
-  tests/integration/sqlite_deno_test.ts tests/integration/ergonomics_test.ts
-tests/integration/node_modules/.bin/tsc --project tests/integration/tsconfig.json
-deno test --config tests/integration/deno.json --allow-read --allow-write --allow-env --allow-ffi \
-  tests/integration/sqlite_deno_test.ts tests/integration/ergonomics_test.ts tests/runtime/
+node_modules/.bin/tsc --project tests/runtime/tsconfig.json
+node_modules/.bin/tsc --project tests/integration/tsconfig.json
+node_modules/.bin/tsc --project tests/integration/tsconfig.bun.json
+"${NODE:-node}" --test tests/runtime/*test.ts
 
 # Node and Bun run the generated modules against their own driver behavior.
-node --test tests/integration/sqlite_node_test.ts tests/integration/servers_test.ts \
+"${NODE:-node}" --test tests/integration/sqlite_node_test.ts tests/integration/sqlite_builtin_test.ts \
+  tests/integration/ergonomics_test.ts tests/integration/servers_test.ts \
   tests/integration/embed_types_test.ts tests/integration/enum_types_test.ts
-tests/integration/node_modules/.bin/bun test tests/integration/sqlite_node_test.ts \
-  tests/integration/servers_test.ts tests/integration/embed_types_test.ts tests/integration/enum_types_test.ts
+node_modules/.bin/bun test tests/integration/sqlite_node_test.ts tests/integration/sqlite_builtin_test.ts \
+  tests/integration/sqlite_bun_test.ts \
+  tests/integration/ergonomics_test.ts tests/integration/servers_test.ts tests/integration/embed_types_test.ts tests/integration/enum_types_test.ts

@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- Driver stubs must return promises, including thrown failures.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import Database from "better-sqlite3";
@@ -76,40 +75,48 @@ test("stock sqlc embedded rows preserve required and optional join sides", async
   const score = { id: 2, studentId: 1, score: 99 };
   const absentStudent = { id: null, name: null, nickname: null };
   const absentScore = { id: null, studentId: null, score: null };
-  assert.deepEqual(await innerScores(database([1, "Ada", null, 2, 1, 99])), [{
-    students: student,
-    testScores: score,
-  }]);
+  assert.deepEqual(await innerScores(database([1, "Ada", null, 2, 1, 99])), [
+    {
+      students: student,
+      testScores: score,
+    },
+  ]);
   assert.deepEqual(
     await leftScores(database([1, "Ada", null, null, null, null])),
     [{ students: student, testScores: absentScore }],
   );
-  assert.deepEqual(await rightScores(database([null, null, null, 2, 1, 99])), [{
-    students: absentStudent,
-    testScores: score,
-  }]);
-  assert.deepEqual(await fullScores(database([null, null, null, 2, 1, 99])), [{
-    students: absentStudent,
-    testScores: score,
-  }]);
+  assert.deepEqual(await rightScores(database([null, null, null, 2, 1, 99])), [
+    {
+      students: absentStudent,
+      testScores: score,
+    },
+  ]);
+  assert.deepEqual(await fullScores(database([null, null, null, 2, 1, 99])), [
+    {
+      students: absentStudent,
+      testScores: score,
+    },
+  ]);
   assert.deepEqual(
     await selfJoin(database([1, "Ada", null, null, null, null])),
     [{ students: student, students_2: absentStudent }],
   );
 });
 
-test("SQLite extends the complete comma join with nulls before RIGHT/FULL JOIN", async () => {
+test("SQLite extends the complete comma join with nulls before RIGHT/FULL JOIN", () => {
   const db = new Database(":memory:");
   try {
     db.exec(
       "CREATE TABLE a (id INTEGER NOT NULL); CREATE TABLE b (id INTEGER NOT NULL); CREATE TABLE c (id INTEGER NOT NULL); INSERT INTO c VALUES (3)",
     );
-    assert.deepEqual(await commaRight(db), [{ a: { id: null }, c: { id: 3 } }]);
-    assert.deepEqual(await commaFull(db), [{
-      a: { id: null },
-      b: { id: null },
-      c: { id: 3 },
-    }]);
+    assert.deepEqual(commaRight(db), [{ a: { id: null }, c: { id: 3n } }]);
+    assert.deepEqual(commaFull(db), [
+      {
+        a: { id: null },
+        b: { id: null },
+        c: { id: 3n },
+      },
+    ]);
   } finally {
     db.close();
   }

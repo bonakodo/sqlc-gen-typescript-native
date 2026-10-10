@@ -1,3 +1,5 @@
+import { test } from "node:test";
+import { writeFile, rm, mkdir } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { compareBuilds, generate, output } from "./generation_helpers.ts";
@@ -13,54 +15,55 @@ function declarations(source: string): Map<string, string> {
   );
 }
 
-Deno.test("shared helper names survive new and reordered queries", async () => {
+test("shared helper names survive new and reordered queries", async () => {
   const directory = join(output, "stable-helper-names");
-  await Deno.remove(directory, { recursive: true }).catch((error) => {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  await rm(directory, { recursive: true }).catch((error) => {
+    if (!((error as NodeJS.ErrnoException).code === "ENOENT")) throw error;
   });
-  await Deno.mkdir(join(directory, "queries"), { recursive: true });
-  await Deno.writeTextFile(
+  await mkdir(join(directory, "queries"), { recursive: true });
+  await writeFile(
     join(directory, "schema.sql"),
     'CREATE TABLE entries (id INTEGER NOT NULL, "a.b" TEXT, a_b TEXT, notes TEXT);',
   );
   const read = (name: string) =>
     `-- name: ${name} :one\nSELECT id, "a.b", a_b FROM entries WHERE id = sqlc.arg('id');\n`;
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/middle.sql"),
     read("ReadEntry") + read("ReadAgain"),
   );
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/collision.sql"),
     // These field names have equal 32-bit metadata hashes. A hash must never
     // substitute for full field/shape equality.
     '-- name: ReadHashCollision :one\nSELECT id AS "collisionFieldAA366f8713", id AS "collisionFieldAA7556c58a" FROM entries;\n',
   );
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/last.sql"),
     "-- name: ReadNotes :many\nSELECT notes FROM entries WHERE notes = sqlc.narg('notes');\n",
   );
   const regenerate = async () => {
-    await generate(directory, [{
-      engine: "sqlite",
-      schema: "schema.sql",
-      queries: "queries",
-      codegen: ["wasm", "raw"].map((plugin) => ({
-        plugin,
-        out: plugin,
-        options: {
-          runtime: "deno",
-          driver: "@bonakodo/sqlite",
-          sqlite_type_mode: "native",
-          optional_nullable_args: true,
-        },
-      })),
-    }]);
+    await generate(directory, [
+      {
+        engine: "sqlite",
+        schema: "schema.sql",
+        queries: "queries",
+        codegen: ["wasm", "raw"].map((plugin) => ({
+          plugin,
+          out: plugin,
+          options: {
+            runtime: "node",
+            driver: "node:sqlite",
+            optional_nullable_args: true,
+          },
+        })),
+      },
+    ]);
     return await compareBuilds(directory);
   };
   const before = await regenerate();
   const helpers = declarations(before["query_helpers.ts"]!);
   assert(helpers.size > 0);
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/first.sql"),
     // Both a new shape and an earlier occurrence of an existing shape must
     // leave existing callers, field metadata, and shared declarations intact.
@@ -76,7 +79,7 @@ Deno.test("shared helper names survive new and reordered queries", async () => {
     assert.equal(laterHelpers.get(name), declaration, `${name} changed`);
   }
   // Reorder the source without changing query names or shapes.
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "queries/middle.sql"),
     read("ReadAgain") + read("ReadEntry"),
   );
@@ -88,7 +91,7 @@ Deno.test("shared helper names survive new and reordered queries", async () => {
   assert(names.some((name) => /^read[\w$]{1,6}$/.test(name)));
   assert(
     names.every((name) =>
-      /^(?:Args|Row|bind|read|f)[\w$]{1,6}(?:_2)?$/.test(name)
+      /^(?:Args|Row|bind|read|f)[\w$]{1,6}(?:_2)?$/.test(name),
     ),
   );
   // The complete 32-bit hash fits into six valid identifier characters.

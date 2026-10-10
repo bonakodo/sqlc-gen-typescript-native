@@ -1,3 +1,4 @@
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   decodeArray,
@@ -8,10 +9,14 @@ import {
 } from "./.generated/server/runtime_postgresql.ts";
 import { encodeValue as encodePostgresValue } from "./.generated/postgres/runtime_postgresql.ts";
 
-Deno.test("generated pg and postgres.js runtimes keep their distinct JSON bindings", () => {
-  for (
-    const value of [{ nested: [null, true, "text"] }, [1, 2], "text", 42, true]
-  ) {
+test("generated pg and postgres.js runtimes keep their distinct JSON bindings", () => {
+  for (const value of [
+    { nested: [null, true, "text"] },
+    [1, 2],
+    "text",
+    42,
+    true,
+  ]) {
     assert.equal(encodeValue("json", value, false), JSON.stringify(value));
     assert.strictEqual(encodePostgresValue("json", value, false), value);
   }
@@ -26,7 +31,7 @@ Deno.test("generated pg and postgres.js runtimes keep their distinct JSON bindin
   );
 });
 
-Deno.test("JSON values retain nested arrays, objects, and JSON null", () => {
+test("JSON values retain nested arrays, objects, and JSON null", () => {
   const shared = { nested: [null, true, "text", 2.5] };
   const value = { first: shared, second: shared };
   assert.strictEqual(jsonValue(value), value);
@@ -36,29 +41,27 @@ Deno.test("JSON values retain nested arrays, objects, and JSON null", () => {
   assert.equal(decodeValue("json", null, false, true), null);
 });
 
-Deno.test("JSON rejects nested values that serialization would silently change", () => {
+test("JSON rejects nested values that serialization would silently change", () => {
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
-  for (
-    const value of [
-      { missing: undefined },
-      [undefined],
-      new Array(1),
-      { invalid: Infinity },
-      { invalid: NaN },
-      { invalid: 1n },
-      { invalid: () => 1 },
-      { invalid: Symbol("value") },
-      { invalid: new Date() },
-      cycle,
-    ]
-  ) {
+  for (const value of [
+    { missing: undefined },
+    [undefined],
+    new Array(1),
+    { invalid: Infinity },
+    { invalid: NaN },
+    { invalid: 1n },
+    { invalid: () => 1 },
+    { invalid: Symbol("value") },
+    { invalid: new Date() },
+    cycle,
+  ]) {
     assert.throws(() => encodeValue("json", value, false), TypeError);
     assert.throws(() => decodeValue("json", value, false, false), TypeError);
   }
 });
 
-Deno.test("JSON keeps the driver's nullable-column policy without shape checks", () => {
+test("JSON keeps the driver's nullable-column policy without shape checks", () => {
   assert.equal(encodeValue("json", undefined, true), null);
   assert.equal(encodeValue("json", null, true), null);
   assert.equal(decodeValue("json", null, true, false), null);
@@ -72,7 +75,7 @@ Deno.test("JSON keeps the driver's nullable-column policy without shape checks",
   );
 });
 
-Deno.test("SQL JSON arrays preserve scalar JSON arrays and nullable SQL elements", () => {
+test("SQL JSON arrays preserve scalar JSON arrays and nullable SQL elements", () => {
   const values = [[1, [2, null]], { text: 'comma, quote" brace}' }, null];
   const encoded = encodeArray("json", values, 1);
   assert.equal(typeof encoded, "string");
@@ -82,7 +85,10 @@ Deno.test("SQL JSON arrays preserve scalar JSON arrays and nullable SQL elements
     values[1],
     undefined,
   ]);
-  const matrix = [[values[0], values[1]], [values[1], null]];
+  const matrix = [
+    [values[0], values[1]],
+    [values[1], null],
+  ];
   assert.deepEqual(
     decodeArray("json", encodeArray("json", matrix, 2), 2, false, false),
     matrix,

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Assemble hand-written WAT plus static output data using installed native tools.
-# Deno may fetch the standard-library packages pinned by deno.lock on first use.
+# Run npm ci once to install the pinned development tools.
 #
 # Usage: tools/build.sh [output.wasm]
-# Tools: WAT2WASM, WASM2WAT, WASMOPT, DENO may override executable paths.
+# Tools: WAT2WASM, WASM2WAT, WASMOPT, NODE may override executable paths.
 # SKIP_OPTIMIZE=1 publishes the assembled bytes without Binaryen optimization.
 # PACK_DATA=0 keeps static data unpacked; the default packs data only.
 set -euo pipefail
@@ -25,7 +25,7 @@ if [[ -x "$wat_repo/bin/.tools/wabt-1.0.41/bin/wat2wasm" ]]; then
   wat_assembler=${WAT2WASM:-"$wat_repo/bin/.tools/wabt-1.0.41/bin/wat2wasm"}
   wat_disassembler=${WASM2WAT:-"$wat_repo/bin/.tools/wabt-1.0.41/bin/wasm2wat"}
 fi
-wat_deno=${DENO:-deno}
+wat_node=${NODE:-node}
 wat_skip=${SKIP_OPTIMIZE:-0}
 wat_pack=${PACK_DATA:-1}
 if [[ "$wat_skip" != 0 && "$wat_skip" != 1 ]]; then
@@ -36,7 +36,7 @@ if [[ "$wat_pack" != 0 && "$wat_pack" != 1 ]]; then
   printf 'PACK_DATA must be 0 or 1\n' >&2
   exit 1
 fi
-for wat_tool in "$wat_assembler" "$wat_disassembler" "$wat_deno"; do
+for wat_tool in "$wat_assembler" "$wat_disassembler" "$wat_node"; do
   if ! command -v "$wat_tool" >/dev/null 2>&1; then
     printf 'Required tool is unavailable: %s\n' "$wat_tool" >&2
     exit 1
@@ -62,7 +62,7 @@ trap 'rm -rf "$wat_stage"' EXIT
 
 # assets.ts only turns trusted TypeScript templates into data bytes. The WAT
 # algorithms below copy that text into generated projects; they never run it.
-"$wat_deno" run --config "$wat_repo/deno.json" --allow-read --allow-write "$wat_repo/tools/assets.ts" "$wat_stage/assets.wat"
+"$wat_node" "$wat_repo/tools/assets.ts" "$wat_stage/assets.wat"
 printf '(module\n' > "$wat_stage/base.wat"
 cat "$wat_repo/src/args-imports.wat" "$wat_repo/src/core.wat" "$wat_stage/assets.wat" >> "$wat_stage/base.wat"
 for wat_fragment in \
@@ -81,7 +81,7 @@ wat_assembly="$wat_stage/plugin.wat"
 if [[ "$wat_pack" == 1 ]]; then
   cat "$wat_stage/base.wat" "$wat_repo/src/init-data.wat" > "$wat_stage/packing-source.wat"
   printf '\n)\n' >> "$wat_stage/packing-source.wat"
-  "$wat_deno" run --config "$wat_repo/deno.json" --allow-read --allow-write "$wat_repo/tools/pack-data.ts" "$wat_stage/packing-source.wat" "$wat_stage/plugin.packed.wat"
+  "$wat_node" "$wat_repo/tools/pack-data.ts" "$wat_stage/packing-source.wat" "$wat_stage/plugin.packed.wat"
   wat_assembly="$wat_stage/plugin.packed.wat"
 fi
 "$wat_assembler" "$wat_assembly" -o "$wat_stage/plugin.raw.wasm"
@@ -94,7 +94,7 @@ fi
 "$wat_disassembler" "$wat_stage/plugin.wasm" -o "$wat_stage/verified.wat"
 
 # Validate the final module and create its checksum before publishing files.
-"$wat_deno" run --config "$wat_repo/deno.json" --allow-read --allow-write "$wat_repo/tools/verify-wasm.ts" \
+"$wat_node" "$wat_repo/tools/verify-wasm.ts" \
   "$wat_stage/plugin.wasm" "$wat_stage/verified.wat" "$wat_output"
 
 # All checks precede publication. Keep the verbose assembled WAT and the raw

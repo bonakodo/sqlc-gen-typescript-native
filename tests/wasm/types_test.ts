@@ -1,3 +1,8 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import defaults from "./fixtures/sqlite-default-components.json" with { type: "json" };
+import { sqliteDefaultOptions } from "./test_helpers.ts";
 import { generateAssets } from "../../tools/assets.ts";
 import type { Column, Identifier } from "./fixture_types.ts";
 import { Buffer } from "node:buffer";
@@ -11,7 +16,7 @@ import {
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT types", async () => {
+test("WAT types", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     argument_type_text: (a0: number) => [number, number];
@@ -85,7 +90,7 @@ Deno.test("WAT types", async () => {
   }
   // Exact type/conversion checks against the prior generator's frozen
   // reference results. Normal tests compile hand-written WAT only.
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-types-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-types-"));
   let wasm;
   try {
     const assets = await generateAssets();
@@ -110,7 +115,7 @@ Deno.test("WAT types", async () => {
     ];
     const fragments = await Promise.all(
       names.map((n) =>
-        Deno.readTextFile(new URL(`../../src/${n}.wat`, import.meta.url))
+        readFile(new URL(`../../src/${n}.wat`, import.meta.url), "utf8"),
       ),
     );
     const funcs = [
@@ -146,21 +151,27 @@ Deno.test("WAT types", async () => {
       "out_cursor",
       "out_indent",
     ];
-    const source = "(module\n" + fragments.join("\n") + legacyOutputHarness +
+    const source =
+      "(module\n" +
+      fragments.join("\n") +
+      legacyOutputHarness +
       "\n" +
-      assets + "\n" +
-      funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") + "\n" +
-      globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") + "\n)";
-    await Deno.writeTextFile(join(directory, "types.wat"), source);
-    const compile = await command(wabt("wat2wasm"), [
-      join(directory, "types.wat"),
-      "-o",
-      join(directory, "types.wasm"),
-    ], { encoding: "utf8" });
+      assets +
+      "\n" +
+      funcs.map((n) => `(export "${n}" (func $${n}))`).join("\n") +
+      "\n" +
+      globals.map((n) => `(export "${n}" (global $${n}))`).join("\n") +
+      "\n)";
+    await writeFile(join(directory, "types.wat"), source);
+    const compile = await command(
+      wabt("wat2wasm"),
+      [join(directory, "types.wat"), "-o", join(directory, "types.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(compile.status, 0, compile.stderr);
-    wasm = await Deno.readFile(join(directory, "types.wasm"));
+    wasm = await readFile(join(directory, "types.wasm"));
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 
   let stderr = "";
@@ -200,44 +211,46 @@ Deno.test("WAT types", async () => {
   function identifier(v?: Identifier) {
     if (!v) return 0;
     const p = e.pb_record(11);
-    for (
-      const [k, f] of [["catalog", 1], ["schema", 2], ["name", 3]] as const
-    ) if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
+    for (const [k, f] of [
+      ["catalog", 1],
+      ["schema", 2],
+      ["name", 3],
+    ] as const)
+      if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
     return p;
   }
   function column(v?: Column) {
     if (!v) return 0;
     const p = e.pb_record(12);
-    for (
-      const [k, f] of [["name", 1], ["comment", 5], ["scope", 9], [
-        "table_alias",
-        11,
-      ], ["original_name", 15]] as const
-    ) if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
-    for (
-      const [k, f] of [
-        ["not_null", 3],
-        ["is_array", 4],
-        ["length", 6],
-        ["is_named_param", 7],
-        ["is_func_call", 8],
-        ["is_sqlc_slice", 13],
-        ["unsigned", 16],
-        ["array_dims", 17],
-      ] as const
-    ) memory.writeInt32LE(Number(v[k] ?? 0), e.slot(p, f));
-    for (
-      const [k, f] of [["table", 10], ["type", 12], [
-        "embed_table",
-        14,
-      ]] as const
-    ) memory.writeInt32LE(identifier(v[k]), e.slot(p, f));
+    for (const [k, f] of [
+      ["name", 1],
+      ["comment", 5],
+      ["scope", 9],
+      ["table_alias", 11],
+      ["original_name", 15],
+    ] as const)
+      if (v[k] !== undefined) e.set_text(p, 32 + f * 12, ...put(v[k] ?? ""));
+    for (const [k, f] of [
+      ["not_null", 3],
+      ["is_array", 4],
+      ["length", 6],
+      ["is_named_param", 7],
+      ["is_func_call", 8],
+      ["is_sqlc_slice", 13],
+      ["unsigned", 16],
+      ["array_dims", 17],
+    ] as const)
+      memory.writeInt32LE(Number(v[k] ?? 0), e.slot(p, f));
+    for (const [k, f] of [
+      ["table", 10],
+      ["type", 12],
+      ["embed_table", 14],
+    ] as const)
+      memory.writeInt32LE(identifier(v[k]), e.slot(p, f));
     return p;
   }
   const cases = JSON.parse(
-    await Deno.readTextFile(
-      new URL("./fixtures/types.json", import.meta.url),
-    ),
+    await readFile(new URL("./fixtures/types.json", import.meta.url), "utf8"),
   ).cases;
   const mismatches = [];
   for (const [i, want] of cases.entries()) {
@@ -255,11 +268,12 @@ Deno.test("WAT types", async () => {
     const input = want.input;
     let got: Record<string, unknown> = {};
     try {
-      e.gen_engine.value =
-        ({ sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>)[
-          input.Engine
-        ];
-      const json = Buffer.from(JSON.stringify(input.Options));
+      e.gen_engine.value = (
+        { sqlite: 1, postgresql: 2, mysql: 3 } as Record<string, number>
+      )[input.Engine];
+      const json = Buffer.from(
+        JSON.stringify(sqliteDefaultOptions(input.Options)),
+      );
       memory.set(json, 35000000);
       e.gen_options.value = e.options_parse(35000000, json.length);
       e.gen_catalog.value = e.pb_record(6);
@@ -303,11 +317,15 @@ Deno.test("WAT types", async () => {
       got.interface = memory.subarray(50331648, e.out_cursor.value).toString();
     } catch (error) {
       got = {
-        error: errorMessage(error).replace(/^error generating output: /, "")
+        error: errorMessage(error)
+          .replace(/^error generating output: /, "")
           .replace(/\n$/, ""),
       };
     }
-    const expected = { ...want };
+    const expected: Record<string, unknown> = {
+      ...want,
+      ...((defaults.types as Record<string, unknown>)[i] as object),
+    };
     delete expected.input;
     try {
       assert.deepEqual(got, expected);

@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- Driver stubs must return promises, including thrown failures.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {

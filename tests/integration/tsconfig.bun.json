@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "bun"
+    ]
+  },
+  "include": [
+    ".generated/bun-sqlite*/wasm/*.ts",
+    "sqlite_bun_test.ts"
+  ],
+  "exclude": []
+}

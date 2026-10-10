@@ -1,4 +1,9 @@
+import { Worker } from "node:worker_threads";
+import { command } from "./test_helpers.ts";
+import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
+import { migrateDriverDiagnostic } from "./test_helpers.ts";
 import { assertPreservedOutput } from "./runtime_migration.ts";
 import type { IOOptions, runPlugin } from "./wasi_test_host.ts";
 type PluginResult = Awaited<ReturnType<typeof runPlugin>>;
@@ -6,16 +11,16 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
-Deno.test("WAT adversarial", async (t) => {
+test("WAT adversarial", async (t) => {
   // Adversarial full-plugin tests with fresh instances and bounded execution.
-  // Usage: deno test -A tests/wasm/adversarial_test.ts -- [candidate.wasm] [name-filter]
+  // Usage: WASM_BINARY=candidate.wasm WASM_FILTER=name-filter node --test tests/wasm/adversarial_test.ts
   // Optional ORACLE=/path/to/native/plugin checks the marked small cases against
   // a fresh native reference. Capacity cases intentionally stay WASM-only.
 
-  const binaryPath = Deno.args[0] ||
-    "bin/sqlc-gen-typescript-native.wasm";
-  const filter = Deno.args[1] || "";
-  const binary = await Deno.readFile(binaryPath);
+  const binaryPath =
+    process.env.WASM_BINARY || "bin/sqlc-gen-typescript-native.wasm";
+  const filter = process.env.WASM_FILTER || "";
+  const binary = await readFile(binaryPath);
   const INPUT = 16 * 1024 * 1024;
   const SEED = 0xa17e5eed;
   const hash = (bytes: Uint8Array) =>
@@ -29,8 +34,7 @@ Deno.test("WAT adversarial", async (t) => {
     ready: Promise<WorkerReply>;
     constructor(bytes: Uint8Array) {
       this.worker = new Worker(
-        new URL("./adversarial_worker.ts", import.meta.url).href,
-        { type: "module" },
+        new URL("./adversarial_worker.ts", import.meta.url),
       );
       this.ready = this.receive(10000);
       this.worker.postMessage({ binary: bytes });
@@ -39,15 +43,14 @@ Deno.test("WAT adversarial", async (t) => {
       return new Promise((resolve, reject) => {
         const cleanup = () => {
           clearTimeout(timer);
-          this.worker.removeEventListener("message", message);
-          this.worker.removeEventListener("error", error);
+          this.worker.off("message", message);
+          this.worker.off("error", error);
         };
-        const message = (event: MessageEvent<WorkerReply>) => {
+        const message = (data: WorkerReply) => {
           cleanup();
-          resolve(event.data);
+          resolve(data);
         };
-        const error = (event: ErrorEvent) => {
-          event.preventDefault();
+        const error = (event: Error) => {
           cleanup();
           reject(Error(event.message));
         };
@@ -56,8 +59,8 @@ Deno.test("WAT adversarial", async (t) => {
           this.worker.terminate();
           reject(Error(`guest exceeded ${timeout} ms deadline`));
         }, timeout);
-        this.worker.addEventListener("message", message, { once: true });
-        this.worker.addEventListener("error", error, { once: true });
+        this.worker.once("message", message);
+        this.worker.once("error", error);
       });
     }
     async run(
@@ -120,17 +123,15 @@ Deno.test("WAT adversarial", async (t) => {
     params?: Uint8Array[];
     comments?: Bytes[];
   }
-  function query(
-    {
-      name = "GetValue",
-      sql = "SELECT 1",
-      filename = "queries.sql",
-      cmd = ":one",
-      columns = [column()],
-      params = [],
-      comments = [],
-    }: QueryOptions = {},
-  ) {
+  function query({
+    name = "GetValue",
+    sql = "SELECT 1",
+    filename = "queries.sql",
+    cmd = ":one",
+    columns = [column()],
+    params = [],
+    comments = [],
+  }: QueryOptions = {}) {
     return join(
       bytesField(1, sql),
       bytesField(2, name),
@@ -165,17 +166,15 @@ Deno.test("WAT adversarial", async (t) => {
     extra?: Uint8Array[];
     setting?: Uint8Array;
   }
-  function request(
-    {
-      queries = [],
-      tables = [],
-      enums = [],
-      options = defaults,
-      rawOptions,
-      extra = [],
-      setting = settings(),
-    }: RequestOptions = {},
-  ) {
+  function request({
+    queries = [],
+    tables = [],
+    enums = [],
+    options = defaults,
+    rawOptions,
+    extra = [],
+    setting = settings(),
+  }: RequestOptions = {}) {
     return join(
       bytesField(1, setting),
       bytesField(2, catalog(tables, enums)),
@@ -190,7 +189,9 @@ Deno.test("WAT adversarial", async (t) => {
   function fields(bytes: Uint8Array) {
     let at = 0;
     const uint = () => {
-      let value = 0, shift = 0, byte;
+      let value = 0,
+        shift = 0,
+        byte;
       do {
         assert.ok(
           at < bytes.length && shift < 35,
@@ -222,7 +223,10 @@ Deno.test("WAT adversarial", async (t) => {
     const files = fields(bytes).map(([key, body]) => {
       assert.equal(key, 1);
       const file = fields(body);
-      assert.deepEqual(file.map(([n]) => n), [1, 2]);
+      assert.deepEqual(
+        file.map(([n]) => n),
+        [1, 2],
+      );
       const name = utf8.decode(file[0][1]);
       assert.ok(
         name.length > 0 && !name.includes("\0"),
@@ -247,7 +251,10 @@ Deno.test("WAT adversarial", async (t) => {
   }
 
   const runner = new Runner(binary);
-  let passed = 0, succeeded = 0, rejected = 0, oracleChecks = 0;
+  let passed = 0,
+    succeeded = 0,
+    rejected = 0,
+    oracleChecks = 0;
   const baseline = new Map<Uint8Array, PluginResult>();
   interface CheckOptions {
     status?: number;
@@ -261,11 +268,19 @@ Deno.test("WAT adversarial", async (t) => {
   async function check(
     name: string,
     payload: Uint8Array,
-    { status, diagnostic, args = [], io = {}, same, inspect, oracle = false }:
-      CheckOptions = {},
+    {
+      status,
+      diagnostic,
+      args = [],
+      io = {},
+      same,
+      inspect,
+      oracle = false,
+    }: CheckOptions = {},
   ) {
     if (filter && !name.includes(filter)) return;
-    const ok = await t.step(name, async () => {
+    let failure: Error | undefined;
+    await t.test(name, async () => {
       try {
         const actual = await runner.run(payload, args, io);
         assert.ok(
@@ -307,35 +322,14 @@ Deno.test("WAT adversarial", async (t) => {
           assert.deepEqual(actual.stdout, expected.stdout);
           assert.deepEqual(actual.stderr, expected.stderr);
         }
-        if (oracle && Deno.env.get("ORACLE")) {
-          const child = new Deno.Command(Deno.env.get("ORACLE")!, {
-            args,
-            stdin: "piped",
-            stdout: "piped",
-            stderr: "piped",
-          }).spawn();
-          const timer = setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch { /* Already exited. */ }
-          }, 5000);
-          let native: Deno.CommandOutput;
-          try {
-            const writer = child.stdin.getWriter();
-            const write = async () => {
-              try {
-                await writer.write(payload);
-              } finally {
-                await writer.close();
-              }
-            };
-            [native] = await Promise.all([child.output(), write()]);
-          } finally {
-            clearTimeout(timer);
-          }
-          assert.equal(native.signal, null);
-          assert.equal(actual.status, native.code);
-          if (native.code !== 0 || !native.stdout.length) {
+        if (oracle && process.env["ORACLE"]) {
+          const native = await command(process.env["ORACLE"]!, args, {
+            input: payload,
+            encoding: null,
+            timeout: 5000,
+          });
+          assert.equal(actual.status, native.status);
+          if (native.status !== 0 || !native.stdout.length) {
             assert.deepEqual(actual.stdout, Buffer.from(native.stdout));
           } else {
             // Intentional private-code sharing changes success bytes. Keep the
@@ -343,22 +337,28 @@ Deno.test("WAT adversarial", async (t) => {
             // bytes against reviewed expectations for both WASM builds.
             assertPreservedOutput(Buffer.from(native.stdout), actual.stdout);
           }
-          assert.deepEqual(actual.stderr, Buffer.from(native.stderr));
+          assert.deepEqual(
+            actual.stderr,
+            Buffer.from(
+              migrateDriverDiagnostic(new TextDecoder().decode(native.stderr)),
+            ),
+          );
           oracleChecks++;
         }
         passed++;
       } catch (error) {
-        throw new Error(
-          `${name} (seed 0x${
-            SEED.toString(16)
-          }, ${payload.length} bytes, sha256 ${hash(payload)}): ${
+        failure = new Error(
+          `${name} (seed 0x${SEED.toString(
+            16,
+          )}, ${payload.length} bytes, sha256 ${hash(payload)}): ${
             error instanceof Error ? error.message : String(error)
           }`,
           { cause: error },
         );
+        throw failure;
       }
     });
-    if (!ok) throw Error(`Stopped after failed case: ${name}`);
+    if (failure) throw failure;
   }
 
   try {
@@ -381,10 +381,9 @@ Deno.test("WAT adversarial", async (t) => {
 
     // A trap must fail the harness, never masquerade as a clean proc_exit(2).
     const trapModule = Buffer.from(
-      loopModule.toString("hex").replace(
-        "0a0901070003400c000b0b",
-        "0a05010300000b",
-      ),
+      loopModule
+        .toString("hex")
+        .replace("0a0901070003400c000b0b", "0a05010300000b"),
       "hex",
     );
     const trap = new Runner(trapModule);
@@ -397,24 +396,227 @@ Deno.test("WAT adversarial", async (t) => {
       await trap.close();
     }
 
+    for (const [options, diagnostic] of [
+      [
+        { driver: "node:sqlite", runtime: "deno" },
+        'unsupported runtime "deno"; use node or bun',
+      ],
+      [
+        { driver: "@bonakodo/sqlite", runtime: "node" },
+        'unsupported driver "@bonakodo/sqlite"',
+      ],
+      [
+        {
+          driver: "jsr:@bonakodo/sqlite@0.1.0",
+          runtime: "bun",
+          types_only: true,
+        },
+        'unsupported driver "jsr:@bonakodo/sqlite@0.1.0"',
+      ],
+    ] as const) {
+      await check(
+        `removed/${options.driver}/${options.runtime}`,
+        request({ setting: settings("sqlite"), options, queries: [query()] }),
+        {
+          status: 2,
+          diagnostic: new RegExp(RegExp.escape(diagnostic)),
+        },
+      );
+    }
     const plain = request({ queries: [query()] });
     await check("valid/baseline", plain, { status: 0, oracle: true });
-    for (
-      const [i, directive] of [
-        "@lemma ensures true\n//@ assume false",
-        "@lemma ensures true\r//@ assume false",
-        "@lemma contract safe\u2028export const injected = true;",
-        "@lemma contract safe\u2029export const injected = true;",
-        "@lemma requires true\0false",
-        "@lemma requires true\u0001false",
-        "@lemma requires true\u007ffalse",
-        "@lemma requires ",
-        "@lemma ensures   ",
-        "@lemma contract ",
-        "@lemma",
-        "@lemma unknown true",
-      ].entries()
-    ) {
+    for (const [driver, runtime] of [
+      ["node:sqlite", "node"],
+      ["node:sqlite", "bun"],
+      ["bun:sqlite", "bun"],
+    ]) {
+      await check(
+        `${driver}/${runtime}`,
+        request({
+          setting: settings("sqlite"),
+          options: {
+            driver,
+            runtime,
+            emit_query_factory: true,
+          },
+          queries: [
+            ":one",
+            ":many",
+            ":exec",
+            ":execrows",
+            ":execlastid",
+            ":execresult",
+          ].map((cmd, index) =>
+            query({
+              name: `Statement${index}`,
+              cmd,
+              columns:
+                index < 2
+                  ? [
+                      column("id", "integer"),
+                      column("flag", "boolean"),
+                      column("date", "datetime"),
+                      column("blob", "blob"),
+                    ]
+                  : [],
+            }),
+          ),
+        }),
+        {
+          status: 0,
+          inspect(files) {
+            const source = new Map(
+              files.map((file) => [file.name, file.contents]),
+            );
+            const sqlite = source.get("runtime_sqlite.ts")!;
+            const queries = source.get("queries_sql.ts")!;
+            if (driver === "node:sqlite") {
+              assert.match(
+                sqlite,
+                /import type \{ DatabaseSync as Database \} from "node:sqlite"/,
+              );
+              assert.match(sqlite, /setReadBigInts\(true\)/);
+              assert.match(sqlite, /setReturnArrays\(true\)/);
+              assert.match(sqlite, /\.get\(\.\.\./);
+              assert.match(sqlite, /\.all\(\.\.\./);
+              assert.match(sqlite, /\.isOpen/);
+              assert.doesNotMatch(sqlite, /safeIntegers|stmt\.values\(/);
+            } else {
+              assert.match(
+                sqlite,
+                /import type \{ Database \} from "bun:sqlite"/,
+              );
+              assert.match(sqlite, /safeIntegers\(true\)/);
+              assert.match(sqlite, /\.values\(\.\.\./);
+              assert.match(sqlite, /\.finalize\(\)/);
+              assert.doesNotMatch(
+                sqlite,
+                /setReadBigInts|setReturnArrays|\.isOpen/,
+              );
+            }
+            assert.match(sqlite, /\.run\(\.\.\./);
+            assert.doesNotMatch(sqlite, /@bonakodo|better-sqlite3|\.raw\(/);
+            assert.doesNotMatch(queries, /async function|Promise</);
+            const declarations = [...source.values()].join("\n");
+            assert.match(declarations, /id: bigint;/);
+            assert.match(declarations, /flag: boolean;/);
+            assert.match(declarations, /date: Date;/);
+            assert.match(declarations, /blob: Uint8Array;/);
+            assert.match(queries, /function statement4\([^)]*\): bigint/);
+            assert.ok(source.has("query_helpers.ts"));
+            assert.match(source.get("index.ts")!, /function createQueries/);
+          },
+        },
+      );
+    }
+    await check(
+      "node-sqlite/pruned-runtime",
+      request({
+        setting: settings("sqlite"),
+        options: { driver: "node:sqlite" },
+        queries: [query()],
+      }),
+      {
+        status: 0,
+        inspect(files) {
+          const sqlite = files.find(
+            (file) => file.name === "runtime_sqlite.ts",
+          )!.contents;
+          assert.match(sqlite, /setReturnArrays\(true\)/);
+          assert.doesNotMatch(
+            sqlite,
+            /function dateValue|function finiteNumber|function jsonText|function readLastInsertId|function queryMany|function runQuery/,
+          );
+        },
+      },
+    );
+    await check(
+      "node-sqlite/types-only",
+      request({
+        setting: settings("sqlite"),
+        options: { driver: "node:sqlite", types_only: true },
+        queries: [query()],
+      }),
+      {
+        status: 0,
+        inspect(files) {
+          assert.ok(!files.some((file) => file.name.startsWith("runtime")));
+          assert.ok(
+            files.every(
+              (file) => !file.contents.includes('from "node:sqlite"'),
+            ),
+          );
+        },
+      },
+    );
+    await check(
+      "node-sqlite/wrong-engine",
+      request({ options: { driver: "node:sqlite" }, queries: [query()] }),
+      { status: 2, diagnostic: /node:sqlite requires engine: sqlite/ },
+    );
+    await check(
+      "bun-sqlite/pruned-runtime",
+      request({
+        setting: settings("sqlite"),
+        options: {
+          driver: "bun:sqlite",
+          runtime: "bun",
+        },
+        queries: [query()],
+      }),
+      {
+        status: 0,
+        inspect(files) {
+          const sqlite = files.find(
+            (file) => file.name === "runtime_sqlite.ts",
+          )!.contents;
+          assert.match(sqlite, /safeIntegers\(true\)/);
+          assert.doesNotMatch(
+            sqlite,
+            /function dateValue|function finiteNumber|function jsonText|function readLastInsertId|function queryMany|function runQuery/,
+          );
+        },
+      },
+    );
+    await check(
+      "bun-sqlite/types-only",
+      request({
+        setting: settings("sqlite"),
+        options: { driver: "bun:sqlite", runtime: "bun", types_only: true },
+        queries: [query()],
+      }),
+      {
+        status: 0,
+        inspect(files) {
+          assert.ok(!files.some((file) => file.name.startsWith("runtime")));
+          assert.ok(
+            files.every((file) => !file.contents.includes('from "bun:sqlite"')),
+          );
+        },
+      },
+    );
+    await check(
+      "bun-sqlite/wrong-engine",
+      request({
+        options: { driver: "bun:sqlite", runtime: "bun" },
+        queries: [query()],
+      }),
+      { status: 2, diagnostic: /bun:sqlite requires engine: sqlite/ },
+    );
+    for (const [i, directive] of [
+      "@lemma ensures true\n//@ assume false",
+      "@lemma ensures true\r//@ assume false",
+      "@lemma contract safe\u2028export const injected = true;",
+      "@lemma contract safe\u2029export const injected = true;",
+      "@lemma requires true\0false",
+      "@lemma requires true\u0001false",
+      "@lemma requires true\u007ffalse",
+      "@lemma requires ",
+      "@lemma ensures   ",
+      "@lemma contract ",
+      "@lemma",
+      "@lemma unknown true",
+    ].entries()) {
       await check(
         `lemma/reject-malformed/${i}`,
         request({
@@ -427,30 +629,29 @@ Deno.test("WAT adversarial", async (t) => {
         options: { ...defaults, emitLemmaScript: false },
         queries: [query({ comments: [directive] })],
       });
-      await check(
-        `lemma/disabled-keeps-existing-comments/${i}`,
-        disabled,
-        {
-          status: 0,
-          same: request({ queries: [query({ comments: [directive] })] }),
-        },
-      );
+      await check(`lemma/disabled-keeps-existing-comments/${i}`, disabled, {
+        status: 0,
+        same: request({ queries: [query({ comments: [directive] })] }),
+      });
     }
     await check(
       "lemma/safe-text-cannot-end-line-comment",
       request({
         options: { ...defaults, emitLemmaScript: true },
-        queries: [query({
-          comments: [
-            "@lemma contract Keep */ and /* and ` and ${value} as prose.",
-          ],
-        })],
+        queries: [
+          query({
+            comments: [
+              "@lemma contract Keep */ and /* and ` and ${value} as prose.",
+            ],
+          }),
+        ],
       }),
       {
         status: 0,
         inspect(files) {
-          const source = files.find((file) => file.name === "queries_sql.ts")
-            ?.contents;
+          const source = files.find(
+            (file) => file.name === "queries_sql.ts",
+          )?.contents;
           assert(source);
           assert.match(
             source,
@@ -463,17 +664,20 @@ Deno.test("WAT adversarial", async (t) => {
       "lemma/metadata-escapes-schema-and-query-text",
       request({
         options: { ...defaults, emitLemmaScript: true },
-        queries: [query({
-          name: "Read\n//@ assume false",
-          columns: [column("value\u2028//@ verify")],
-          sql: "SELECT 'template ${value} and ` and */'",
-        })],
+        queries: [
+          query({
+            name: "Read\n//@ assume false",
+            columns: [column("value\u2028//@ verify")],
+            sql: "SELECT 'template ${value} and ` and */'",
+          }),
+        ],
       }),
       {
         status: 0,
         inspect(files) {
-          const source = files.find((file) => file.name === "queries_sql.ts")
-            ?.contents;
+          const source = files.find(
+            (file) => file.name === "queries_sql.ts",
+          )?.contents;
           assert(source);
           const body = source.slice(source.indexOf("export async function"));
           assert.doesNotMatch(body, /^[ \t]*\/\/@ (?:assume|verify)\b/m);
@@ -545,41 +749,40 @@ Deno.test("WAT adversarial", async (t) => {
       {
         status: 0,
         inspect: (files) =>
-          assert.ok(files.some((f) =>
-            f.contents.includes("left\\x00right") ||
-            f.contents.includes("left\\0right") ||
-            f.contents.includes("left\\u0000right")
-          )),
+          assert.ok(
+            files.some(
+              (f) =>
+                f.contents.includes("left\\x00right") ||
+                f.contents.includes("left\\0right") ||
+                f.contents.includes("left\\u0000right"),
+            ),
+          ),
         oracle: true,
       },
     );
-    for (
-      const filename of [
-        "x\0.sql",
-        "a#\0.sql",
-        "../x.sql",
-        "/x.sql",
-        "C:\\x.sql",
-        "..\\x.sql",
-        "a%00.sql",
-        "a?x.sql",
-      ] as const
-    ) {
+    for (const filename of [
+      "x\0.sql",
+      "a#\0.sql",
+      "../x.sql",
+      "/x.sql",
+      "C:\\x.sql",
+      "..\\x.sql",
+      "a%00.sql",
+      "a?x.sql",
+    ] as const) {
       await check(
         `path/${JSON.stringify(filename)}`,
         request({ queries: [query({ filename })] }),
         { status: 2, oracle: true },
       );
     }
-    for (
-      const filename of [
-        "日本語/猫.sql",
-        "e\u0301/é.sql",
-        "a/../b.sql",
-        ".hidden/queries.sql",
-        "a\\b.sql",
-      ] as const
-    ) {
+    for (const filename of [
+      "日本語/猫.sql",
+      "e\u0301/é.sql",
+      "a/../b.sql",
+      ".hidden/queries.sql",
+      "a\\b.sql",
+    ] as const) {
       await check(
         `path/valid/${filename}`,
         request({ queries: [query({ filename })] }),
@@ -630,32 +833,28 @@ Deno.test("WAT adversarial", async (t) => {
         { status: 0, same: plain, oracle: true },
       );
     }
-    for (
-      const rawOptions of [
-        '{"driver":"pg","out":"\\u0000"}',
-        '{"driver":"pg","out":"\\ud800"}',
-        '{"driver":"pg","out":"\\udfff"}',
-        '{"DRIVER":"pg","TYPEſ_ONLY":true}',
-        '{"driver":"pg","driver":null}',
-        '{"driver":"bad","driver":"pg"}',
-      ] as const
-    ) {
+    for (const rawOptions of [
+      '{"driver":"pg","out":"\\u0000"}',
+      '{"driver":"pg","out":"\\ud800"}',
+      '{"driver":"pg","out":"\\udfff"}',
+      '{"DRIVER":"pg","TYPEſ_ONLY":true}',
+      '{"driver":"pg","driver":null}',
+      '{"driver":"bad","driver":"pg"}',
+    ] as const) {
       await check(`json/valid/${rawOptions}`, request({ rawOptions }), {
         status: 0,
         oracle: true,
       });
     }
-    for (
-      const rawOptions of [
-        "\0",
-        '{"driver":"pg"}\0',
-        '{"driver":"p\0g"}',
-        '{"driver":"pg","out":"\\x00"}',
-        '{"driver":"pg","out":"\\u000g"}',
-        '{"driver":"pg","__proto__":{}}',
-        '{"driver":"pg"}{}',
-      ] as const
-    ) {
+    for (const rawOptions of [
+      "\0",
+      '{"driver":"pg"}\0',
+      '{"driver":"p\0g"}',
+      '{"driver":"pg","out":"\\x00"}',
+      '{"driver":"pg","out":"\\u000g"}',
+      '{"driver":"pg","__proto__":{}}',
+      '{"driver":"pg"}{}',
+    ] as const) {
       await check(
         `json/invalid/${JSON.stringify(rawOptions)}`,
         request({ rawOptions }),
@@ -673,30 +872,31 @@ Deno.test("WAT adversarial", async (t) => {
       await check(
         `json/tokens/${count + 7}`,
         request({
-          rawOptions: '{"driver":"pg","types_only":true,"out":[' +
-            Array(count).fill("null").join(",") + "]}",
+          rawOptions:
+            '{"driver":"pg","types_only":true,"out":[' +
+            Array(count).fill("null").join(",") +
+            "]}",
         }),
         {
           status: 2,
-          diagnostic: count === 16377
-            ? /cannot unmarshal array/
-            : /fixed memory capacity/,
+          diagnostic:
+            count === 16377
+              ? /cannot unmarshal array/
+              : /fixed memory capacity/,
         },
       );
     }
-    for (
-      const value of [
-        -2147483648,
-        -1,
-        0,
-        1,
-        6,
-        7,
-        2147483647,
-        0x100000000n,
-        0xffffffffffffffffn,
-      ] as const
-    ) {
+    for (const value of [
+      -2147483648,
+      -1,
+      0,
+      1,
+      6,
+      7,
+      2147483647,
+      0x100000000n,
+      0xffffffffffffffffn,
+    ] as const) {
       const normalized = Number(BigInt.asIntN(32, BigInt(value)));
       await check(
         `integer/array-dimensions/${value}`,
@@ -722,18 +922,16 @@ Deno.test("WAT adversarial", async (t) => {
 
     // Bad wire types, field numbers, varint overflows, non-minimal encodings,
     // embedded groups and every truncation of a valid complete request.
-    for (
-      const [i, bytes] of [
-        [0],
-        [0xff],
-        [0x0f],
-        [0x0e],
-        [0x0c],
-        [0x0a, 0xff, 0xff, 0xff, 0xff, 0x0f],
-        [...Array(10).fill(0x80)],
-        [...Array(9).fill(0xff), 2],
-      ].entries()
-    ) {
+    for (const [i, bytes] of [
+      [0],
+      [0xff],
+      [0x0f],
+      [0x0e],
+      [0x0c],
+      [0x0a, 0xff, 0xff, 0xff, 0xff, 0x0f],
+      [...Array(10).fill(0x80)],
+      [...Array(9).fill(0xff), 2],
+    ].entries()) {
       await check(`wire/malformed/${i}`, Buffer.from(bytes), {
         status: 2,
         oracle: true,
@@ -741,13 +939,14 @@ Deno.test("WAT adversarial", async (t) => {
     }
     for (const number of [1, 5, 500, 536870911] as const) {
       for (const wire of [0, 1, 2, 5] as const) {
-        const value = wire === 0
-          ? varint(0xffffffffffffffffn)
-          : wire === 1
-          ? Buffer.alloc(8, 255)
-          : wire === 5
-          ? Buffer.alloc(4, 255)
-          : join(varint(3), Buffer.from([0, 255, 128]));
+        const value =
+          wire === 0
+            ? varint(0xffffffffffffffffn)
+            : wire === 1
+              ? Buffer.alloc(8, 255)
+              : wire === 5
+                ? Buffer.alloc(4, 255)
+                : join(varint(3), Buffer.from([0, 255, 128]));
         if (number <= 5 && wire === 2) continue;
         await check(
           `wire/unknown-or-wrong-type/${number}/${wire}`,
@@ -826,55 +1025,52 @@ Deno.test("WAT adversarial", async (t) => {
       "capacity/many-files",
       request({
         options: { ...defaults, types_only: true },
-        queries: Array.from(
-          { length: 1025 },
-          (_, i) => query({ name: `Q${i}`, filename: `q${i}.sql` }),
+        queries: Array.from({ length: 1025 }, (_, i) =>
+          query({ name: `Q${i}`, filename: `q${i}.sql` }),
         ),
       }),
       { status: 2, diagnostic: /fixed memory capacity/ },
     );
 
-    for (
-      const [i, io] of [
-        { argsSizeError: true },
-        { argsGetError: true },
-        { argc: 0xffffffff },
-        { argc: 4194304, argBytes: 1 },
-        { methodPointer: 0 },
-        { methodPointer: 67108864 },
-        { unterminatedMethod: true },
-        { readOverreport: true },
-        { stdoutOverreport: true },
-        { stdoutZero: true },
-        { readError: true },
-        { stdoutError: true },
-      ].entries()
-    ) {
+    for (const [i, io] of [
+      { argsSizeError: true },
+      { argsGetError: true },
+      { argc: 0xffffffff },
+      { argc: 4194304, argBytes: 1 },
+      { methodPointer: 0 },
+      { methodPointer: 67108864 },
+      { unterminatedMethod: true },
+      { readOverreport: true },
+      { stdoutOverreport: true },
+      { stdoutZero: true },
+      { readError: true },
+      { stdoutError: true },
+    ].entries()) {
       await check(`host/fault/${i}`, plain, {
         status: 2,
         args: ["/plugin.CodegenService/Generate"],
         io,
       });
     }
-    for (
-      const io of [{ stderrZero: true }, { stderrError: true }, {
+    for (const io of [
+      { stderrZero: true },
+      { stderrError: true },
+      {
         stderrOverreport: true,
-      }] as const
-    ) {
+      },
+    ] as const) {
       await check(
         `host/error-reporting/${Object.keys(io)[0]}`,
         Buffer.from([0]),
         { status: 2, io },
       );
     }
-    for (
-      const text of [
-        nul,
-        "日本語😀",
-        "\u202eunknown",
-        "/plugin.CodegenService/GenerateX",
-      ] as const
-    ) {
+    for (const text of [
+      nul,
+      "日本語😀",
+      "\u202eunknown",
+      "/plugin.CodegenService/GenerateX",
+    ] as const) {
       if (text.includes("\0")) continue; // WASI argv uses NUL termination, unlike protobuf text.
       await check(`args/unknown/${text}`, plain, {
         status: 2,
@@ -892,16 +1088,16 @@ Deno.test("WAT adversarial", async (t) => {
     // Mutated requests may legitimately succeed; validate both outcomes strictly.
     const corpus = JSON.parse(
       gunzipSync(
-        await Deno.readFile(
+        await readFile(
           new URL("./fixtures/generator.json.gz", import.meta.url),
         ),
       ).toString(),
     );
     const seeds = [
       plain,
-      ...corpus.cases.map((c: { request: string }) =>
-        Buffer.from(c.request, "base64")
-      ).filter((b: Buffer) => b.length > 0 && b.length < 32768),
+      ...corpus.cases
+        .map((c: { request: string }) => Buffer.from(c.request, "base64"))
+        .filter((b: Buffer) => b.length > 0 && b.length < 32768),
     ];
     let state = SEED;
     const random = () => {
@@ -912,8 +1108,9 @@ Deno.test("WAT adversarial", async (t) => {
     };
     for (let i = 0; i < 1200; i++) {
       let payload = Buffer.from(seeds[random() % seeds.length]);
-      for (let j = 0, n = 1 + random() % 4; j < n; j++) {
-        const at = random() % (payload.length + 1), kind = random() % 5;
+      for (let j = 0, n = 1 + (random() % 4); j < n; j++) {
+        const at = random() % (payload.length + 1),
+          kind = random() % 5;
         if (kind === 0) payload = payload.subarray(0, at);
         else if (kind === 1 && at < payload.length) {
           payload[at] ^= 1 << (random() % 8);
@@ -928,10 +1125,12 @@ Deno.test("WAT adversarial", async (t) => {
             payload.subarray(0, at),
             payload.subarray(Math.min(at + 1, payload.length)),
           );
-        } else {payload = join(
+        } else {
+          payload = join(
             payload,
             payload.subarray(at, Math.min(at + 16, payload.length)),
-          );}
+          );
+        }
       }
       await check(`mutation/${i}`, payload);
     }
@@ -954,21 +1153,19 @@ Deno.test("WAT adversarial", async (t) => {
     ] as const;
     for (let i = 0; i < 240; i++) {
       const [engine, driver] = dialects[i % dialects.length];
-      const text = strange[random() % strange.length] +
-        strange[random() % strange.length];
+      const text =
+        strange[random() % strange.length] + strange[random() % strange.length];
       const badDimensions = i % 12 === 0;
       const dimensions = badDimensions
         ? 2147483647
         : engine === "postgresql"
-        ? [0, 1, 2, 6][random() % 4]
-        : 0;
-      const fields = Array.from(
-        { length: 1 + random() % 8 },
-        (_, field) =>
-          column(text, field % 2 ? "integer" : "text", [
-            scalar(3, random() % 2),
-            scalar(17, dimensions),
-          ]),
+          ? [0, 1, 2, 6][random() % 4]
+          : 0;
+      const fields = Array.from({ length: 1 + (random() % 8) }, (_, field) =>
+        column(text, field % 2 ? "integer" : "text", [
+          scalar(3, random() % 2),
+          scalar(17, dimensions),
+        ]),
       );
       await check(
         `structured/${engine}/${i}`,
@@ -976,7 +1173,7 @@ Deno.test("WAT adversarial", async (t) => {
           setting: settings(engine),
           options: {
             driver,
-            runtime: ["node", "bun", "deno"][random() % 3],
+            runtime: ["node", "bun"][random() % 2],
             types_only: i % 5 === 0,
             emit_query_factory: true,
             emit_null_as_undefined: Boolean(random() % 2),
@@ -987,22 +1184,23 @@ Deno.test("WAT adversarial", async (t) => {
               fields.map((field) => bytesField(2, field)),
             ),
           ],
-          queries: Array.from({ length: 1 + random() % 4 }, () =>
+          queries: Array.from({ length: 1 + (random() % 4) }, () =>
             query({
               name: `Read${text}`,
               sql: `SELECT '${text}'`,
               columns: fields,
               comments: [text],
-            })),
+            }),
+          ),
         }),
         { status: badDimensions ? 2 : 0, oracle: true },
       );
     }
     assert.ok(passed > 0, "name filter matched no tests");
     console.log(
-      `Adversarial WASM: ${passed} passed (${succeeded} success, ${rejected} clean rejection, ${oracleChecks} native comparisons); seed 0x${
-        SEED.toString(16)
-      }, ${binary.length} bytes`,
+      `Adversarial WASM: ${passed} passed (${succeeded} success, ${rejected} clean rejection, ${oracleChecks} native comparisons); seed 0x${SEED.toString(
+        16,
+      )}, ${binary.length} bytes`,
     );
   } finally {
     await runner.close();

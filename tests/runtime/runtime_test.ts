@@ -1,4 +1,5 @@
-import { Database } from "@bonakodo/sqlite";
+import { test } from "node:test";
+import { DatabaseSync as Database } from "node:sqlite";
 import {
   decodeCustom,
   decodeValue,
@@ -25,24 +26,22 @@ function assertThrows(operation: () => unknown): void {
   throw new Error("Expected an error");
 }
 
-Deno.test("integer conversion preserves signed 64-bit values and rejects rounding", () => {
+test("integer conversion preserves signed 64-bit values and rejects rounding", () => {
   for (const value of [0n, 1n, -(1n << 63n), (1n << 63n) - 1n]) {
     assertEqual(encodeValue("integer", value), value);
     assertEqual(decodeValue("integer", value, false, false), value);
   }
   assertEqual(decodeValue("integer", 42, false, false), 42n);
-  for (
-    const value of [
-      1n << 63n,
-      -(1n << 63n) - 1n,
-      2 ** 53,
-      1.1,
-      NaN,
-      Infinity,
-      "1",
-      true,
-    ]
-  ) {
+  for (const value of [
+    1n << 63n,
+    -(1n << 63n) - 1n,
+    2 ** 53,
+    1.1,
+    NaN,
+    Infinity,
+    "1",
+    true,
+  ]) {
     assertThrows(() => encodeValue("integer", value));
   }
   assertThrows(() => encodeValue("unknown", 2 ** 53));
@@ -50,26 +49,26 @@ Deno.test("integer conversion preserves signed 64-bit values and rejects roundin
   assertEqual(encodeValue("number", 0.25), 0.25);
 });
 
-Deno.test("REAL conversion preserves large, fractional, and subnormal numbers", () => {
+test("REAL conversion preserves large, fractional, and subnormal numbers", () => {
   const database = new Database(":memory:");
   const statement = database.prepare("SELECT CAST(? AS REAL)");
   try {
-    statement.safeIntegers();
-    for (
-      const value of [
-        2 ** 53,
-        1e20,
-        -1e20,
-        2 ** 63,
-        -(2 ** 63),
-        Number.MAX_VALUE,
-        -Number.MAX_VALUE,
-      ]
-    ) {
+    statement.setReadBigInts(true);
+    statement.setReturnArrays(true);
+    for (const value of [
+      2 ** 53,
+      1e20,
+      -1e20,
+      2 ** 63,
+      -(2 ** 63),
+      Number.MAX_VALUE,
+      -Number.MAX_VALUE,
+    ]) {
       const binding = encodeValue("number", value);
       assertEqual(typeof binding, "string");
       assertEqual(binding, String(value));
-      const row = statement.raw().get([binding]);
+      const row = statement.get(binding) as unknown as
+        (null | string | number | bigint | Uint8Array)[] | undefined;
       if (row?.[0] === undefined) throw new Error("Expected a REAL result row");
       assertEqual(decodeValue<number>("number", row[0], false, false), value);
     }
@@ -77,7 +76,8 @@ Deno.test("REAL conversion preserves large, fractional, and subnormal numbers", 
       const binding = encodeValue("number", value);
       assertEqual(typeof binding, "number");
       assertEqual(binding, value);
-      const row = statement.raw().get([binding]);
+      const row = statement.get(binding) as unknown as
+        (null | string | number | bigint | Uint8Array)[] | undefined;
       if (row?.[0] === undefined) throw new Error("Expected a REAL result row");
       assertEqual(decodeValue<number>("number", row[0], false, false), value);
     }
@@ -86,7 +86,8 @@ Deno.test("REAL conversion preserves large, fractional, and subnormal numbers", 
     // Require a finite result within one relative rounding step, so an int64
     // wrap cannot pass while SQLite versions may improve decimal conversion.
     const huge = 2.0954167789372665e229;
-    const row = statement.raw().get([encodeValue("number", huge)]);
+    const row = statement.get(encodeValue("number", huge)) as unknown as
+      (null | string | number | bigint | Uint8Array)[] | undefined;
     if (row?.[0] === undefined) {
       throw new Error("Expected a huge REAL result row");
     }
@@ -100,7 +101,7 @@ Deno.test("REAL conversion preserves large, fractional, and subnormal numbers", 
       );
     }
   } finally {
-    statement[Symbol.dispose]();
+    (statement as unknown as { close(): void }).close();
     database.close();
   }
   for (const value of [NaN, Infinity, -Infinity, 1n, "1.5"]) {
@@ -118,12 +119,12 @@ Deno.test("REAL conversion preserves large, fractional, and subnormal numbers", 
         },
         value,
         false,
-      )
+      ),
     );
   }
 });
 
-Deno.test("NULL remains distinct from empty text and bytes", () => {
+test("NULL remains distinct from empty text and bytes", () => {
   assertEqual(encodeValue("string", undefined), null);
   assertEqual(encodeValue("string", null), null);
   assertEqual(encodeValue("string", ""), "");
@@ -136,7 +137,7 @@ Deno.test("NULL remains distinct from empty text and bytes", () => {
   assertEqual(decodeValue("bytes", empty, true, false), empty);
 });
 
-Deno.test("boolean conversion accepts only 0 and 1 from SQLite", () => {
+test("boolean conversion accepts only 0 and 1 from SQLite", () => {
   assertEqual(encodeValue("boolean", true), 1);
   assertEqual(encodeValue("boolean", false), 0);
   for (const value of [0, 0n]) {
@@ -151,45 +152,41 @@ Deno.test("boolean conversion accepts only 0 and 1 from SQLite", () => {
   assertThrows(() => encodeValue("boolean", 0));
 });
 
-Deno.test("date conversion validates calendar fields and uses UTC", () => {
-  for (
-    const [input, expected] of [
-      ["2024-02-29", "2024-02-29T00:00:00.000Z"],
-      ["2024-02-29 12:34", "2024-02-29T12:34:00.000Z"],
-      ["2024-02-29 12:34:56.123456", "2024-02-29T12:34:56.123Z"],
-      ["2024-02-29T12:34:56+09:00", "2024-02-29T03:34:56.000Z"],
-      ["0099-01-01", "0099-01-01T00:00:00.000Z"],
-      ["+010000-01-01T00:00:00.000Z", "+010000-01-01T00:00:00.000Z"],
-    ] as const
-  ) {
+test("date conversion validates calendar fields and uses UTC", () => {
+  for (const [input, expected] of [
+    ["2024-02-29", "2024-02-29T00:00:00.000Z"],
+    ["2024-02-29 12:34", "2024-02-29T12:34:00.000Z"],
+    ["2024-02-29 12:34:56.123456", "2024-02-29T12:34:56.123Z"],
+    ["2024-02-29T12:34:56+09:00", "2024-02-29T03:34:56.000Z"],
+    ["0099-01-01", "0099-01-01T00:00:00.000Z"],
+    ["+010000-01-01T00:00:00.000Z", "+010000-01-01T00:00:00.000Z"],
+  ] as const) {
     const date = decodeValue<Date>("date", input, false, false);
     assertEqual(date.toISOString(), expected);
     assertEqual(encodeValue("date", date), expected);
   }
-  for (
-    const input of [
-      "2023-02-29",
-      "2024-02-30",
-      "2024-13-01",
-      "2024-00-01",
-      "2024-01-00",
-      "2024-01-01T24:00:00",
-      "2024-01-01T01:60:00",
-      "2024-01-01T01:00:60",
-      "2024-01-01T01:00:00+24:00",
-      "September 7, 2026",
-      "1720000000",
-      1720000000,
-      1720000000n,
-    ]
-  ) {
+  for (const input of [
+    "2023-02-29",
+    "2024-02-30",
+    "2024-13-01",
+    "2024-00-01",
+    "2024-01-00",
+    "2024-01-01T24:00:00",
+    "2024-01-01T01:60:00",
+    "2024-01-01T01:00:60",
+    "2024-01-01T01:00:00+24:00",
+    "September 7, 2026",
+    "1720000000",
+    1720000000,
+    1720000000n,
+  ]) {
     assertThrows(() => decodeValue("date", input, false, false));
   }
   assertThrows(() => encodeValue("date", new Date(NaN)));
   assertThrows(() => encodeValue("date", "2024-01-01"));
 });
 
-Deno.test("JSON conversion keeps source bytes and whitespace intact", () => {
+test("JSON conversion keeps source bytes and whitespace intact", () => {
   const text = ' { "name": "東京", "unsafe": 9007199254740993 }\n';
   const bytes = decodeValue<Uint8Array>("json", text, false, false);
   assertEqual(new TextDecoder().decode(bytes), text);
@@ -199,7 +196,7 @@ Deno.test("JSON conversion keeps source bytes and whitespace intact", () => {
   assertThrows(() => decodeValue("json", 1, false, false));
 });
 
-Deno.test("custom codecs receive non-null values and obey null policy", () => {
+test("custom codecs receive non-null values and obey null policy", () => {
   let calls = 0;
   const codec: SqliteCodec<Date> = {
     /** encode stores exact Unix milliseconds through a custom representation. */
@@ -228,11 +225,11 @@ Deno.test("custom codecs receive non-null values and obey null policy", () => {
   assertThrows(() => encodeCustom(codec, null, false));
   assertThrows(() => decodeCustom(codec, null, false, false));
   assertThrows(() =>
-    encodeCustom({ ...codec, encode: () => 1n << 63n }, date, false)
+    encodeCustom({ ...codec, encode: () => 1n << 63n }, date, false),
   );
 });
 
-Deno.test("lastInsertId reads large IDs without changing database settings", () => {
+test("lastInsertId reads large IDs without changing database settings", () => {
   const database = new Database(":memory:");
   try {
     database.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, data BLOB)");
@@ -241,50 +238,61 @@ Deno.test("lastInsertId reads large IDs without changing database settings", () 
       "INSERT INTO items (id, data) VALUES (?, ?)",
     );
     try {
+      insert.setReadBigInts(true);
       insert.run(9_007_199_254_740_993n, new Uint8Array());
     } finally {
-      insert[Symbol.dispose]();
+      (insert as unknown as { close(): void }).close();
     }
     assertEqual(lastInsertId(database), 9_007_199_254_740_993n);
-    const ordinary = database.prepare("SELECT 9007199254740993");
+    const ordinary = database.prepare("SELECT 42 AS value");
     try {
-      assertEqual(typeof ordinary.raw().get()?.[0], "number");
+      assertEqual(typeof ordinary.get()?.value, "number");
     } finally {
-      ordinary[Symbol.dispose]();
+      (ordinary as unknown as { close(): void }).close();
     }
-    const rollback = database.transaction(() => {
-      database.exec("INSERT INTO items (id) VALUES (12)");
-      assertEqual(lastInsertId(database), 12n);
-      throw new Error("rollback");
-    });
+    const rollback = () => {
+      database.exec("BEGIN");
+      try {
+        database.exec("INSERT INTO items (id) VALUES (12)");
+        assertEqual(lastInsertId(database), 12n);
+        throw new Error("rollback");
+      } finally {
+        database.exec("ROLLBACK");
+      }
+    };
     assertThrows(rollback);
-    const count = database.prepare("SELECT count(*) FROM items");
+    const count = database.prepare("SELECT count(*) AS value FROM items");
     try {
-      assertEqual(count.raw().get()?.[0], 1);
+      assertEqual(count.get()?.value, 1);
     } finally {
-      count[Symbol.dispose]();
+      (count as unknown as { close(): void }).close();
     }
   } finally {
     database.close();
   }
 });
 
-Deno.test("lastInsertId finalizes after setup, execution, and conversion errors", () => {
-  for (
-    const stage of ["safeIntegers", "raw", "get", "decode", "none"] as const
-  ) {
+test("lastInsertId finalizes after setup, execution, and conversion errors", () => {
+  for (const stage of [
+    "setReadBigInts",
+    "setReturnArrays",
+    "get",
+    "decode",
+    "none",
+  ] as const) {
     let finalized = 0;
     const database = {
+      isOpen: true,
       /** prepare returns a statement that fails at the selected lifecycle step. */
       prepare() {
         return {
           /** safeIntegers simulates integer setup. */
-          safeIntegers() {
-            if (stage === "safeIntegers") throw new Error("safeIntegers");
+          setReadBigInts() {
+            if (stage === "setReadBigInts") throw new Error("setReadBigInts");
           },
           /** raw simulates row setup. */
-          raw() {
-            if (stage === "raw") throw new Error("raw");
+          setReturnArrays() {
+            if (stage === "setReturnArrays") throw new Error("setReturnArrays");
             return this;
           },
           /** get simulates execution and malformed integer results. */
@@ -292,8 +300,8 @@ Deno.test("lastInsertId finalizes after setup, execution, and conversion errors"
             if (stage === "get") throw new Error("get");
             return stage === "none" ? undefined : ["invalid"];
           },
-          /** Symbol.dispose counts statement cleanup. */
-          [Symbol.dispose]() {
+          /** close counts statement cleanup. */
+          close() {
             finalized++;
           },
         };

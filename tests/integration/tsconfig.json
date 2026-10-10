@@ -11,7 +11,9 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     ".generated/embed-pg/wasm/*.ts",
@@ -22,13 +24,20 @@
     ".generated/node-*/wasm/*.ts",
     ".generated/bun-*/wasm/*.ts",
     ".generated/mysql-*/wasm/*.ts",
-    ".generated/native-better-sqlite3/wasm/*.ts",
     ".generated/ergonomics-better-sqlite3/wasm/*.ts",
+    ".generated/ergonomics-node-sqlite/wasm/*.ts",
+    ".generated/undefined-node-sqlite/wasm/*.ts",
     ".generated/types-only/wasm/*.ts",
     ".generated/json-*/wasm/*.ts",
     "json_domain.ts",
     "json_types_test.ts",
     "sqlite_node_test.ts",
-    "servers_test.ts"
+    "sqlite_builtin_test.ts",
+    "servers_test.ts",
+    "ergonomics_test.ts",
+    ".generated/undefined/wasm/*.ts"
+  ],
+  "exclude": [
+    ".generated/bun-sqlite*/**"
   ]
 }

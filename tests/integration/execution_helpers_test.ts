@@ -1,3 +1,5 @@
+import { test } from "node:test";
+import { writeFile, rm, mkdir } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -5,27 +7,26 @@ import { compareBuilds, generate, output } from "./generation_helpers.ts";
 
 type Query = (database: unknown, args?: Record<string, unknown>) => unknown;
 
-async function fixture(driver: string, undefinedNull = false, native = true) {
-  const engine = driver === "@bonakodo/sqlite" || driver === "better-sqlite3"
-    ? "sqlite"
-    : driver === "mysql2"
-    ? "mysql"
-    : "postgresql";
+async function fixture(driver: string, undefinedNull = false) {
+  const engine =
+    driver === "node:sqlite" || driver === "better-sqlite3"
+      ? "sqlite"
+      : driver === "mysql2"
+        ? "mysql"
+        : "postgresql";
   const directory = join(
     output,
-    `execution-${driver.replaceAll(/\W/g, "")}-${undefinedNull}${
-      native ? "" : "-compat"
-    }`,
+    `execution-${driver.replaceAll(/\W/g, "")}-${undefinedNull}`,
   );
-  await Deno.remove(directory, { recursive: true }).catch((error) => {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  await rm(directory, { recursive: true }).catch((error) => {
+    if (!((error as NodeJS.ErrnoException).code === "ENOENT")) throw error;
   });
-  await Deno.mkdir(directory, { recursive: true });
-  await Deno.writeTextFile(
+  await mkdir(directory, { recursive: true });
+  await writeFile(
     join(directory, "schema.sql"),
     "CREATE TABLE entries (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);",
   );
-  await Deno.writeTextFile(
+  await writeFile(
     join(directory, "query.sql"),
     `-- name: ReadValue :one
 SELECT value FROM entries WHERE id = sqlc.arg('id');
@@ -37,46 +38,53 @@ UPDATE entries SET value = sqlc.arg('value');
 UPDATE entries SET value = sqlc.arg('value');
 -- name: WriteResult :execresult
 UPDATE entries SET value = sqlc.arg('value');
-` + (engine === "sqlite"
+` +
+      (engine === "sqlite"
         ? `-- name: WriteID :execlastid
 INSERT INTO entries (value) VALUES (sqlc.arg('value'));
 `
         : ""),
   );
-  await generate(directory, [{
-    engine,
-    schema: "schema.sql",
-    queries: "query.sql",
-    codegen: ["wasm", "raw"].map((plugin) => ({
-      plugin,
-      out: plugin,
-      options: {
-        runtime: "deno",
-        driver,
-        emit_null_as_undefined: undefinedNull,
-        ...(engine === "sqlite"
-          ? { sqlite_type_mode: native ? "native" : "driver" }
-          : {}),
-      },
-    })),
-  }]);
+  await generate(directory, [
+    {
+      engine,
+      schema: "schema.sql",
+      queries: "query.sql",
+      codegen: ["wasm", "raw"].map((plugin) => ({
+        plugin,
+        out: plugin,
+        options: {
+          runtime: "node",
+          driver,
+          emit_null_as_undefined: undefinedNull,
+        },
+      })),
+    },
+  ]);
   await compareBuilds(directory);
-  return await import(
+  return (await import(
     pathToFileURL(join(directory, "wasm/query_sql.ts")).href
-  ) as Record<string, Query>;
+  )) as Record<string, Query>;
 }
 
-Deno.test("SQLite execution keeps failures, disposal and conversion order", async () => {
-  const queries = await fixture("@bonakodo/sqlite");
+test("SQLite execution keeps failures, disposal and conversion order", async () => {
+  const queries = await fixture("node:sqlite");
   const events: string[] = [];
   const driverError = new Error("driver failure");
   const disposalError = new Error("disposal failure");
   let failAt = "";
   const database = {
+    isOpen: true,
     prepare() {
       events.push("prepare");
       if (failAt === "prepare") throw driverError;
       return {
+        setReadBigInts() {
+          return this.safeIntegers();
+        },
+        setReturnArrays() {
+          return this.raw();
+        },
         safeIntegers() {
           events.push("safe");
           if (failAt === "safe") throw driverError;
@@ -107,7 +115,7 @@ Deno.test("SQLite execution keeps failures, disposal and conversion order", asyn
             lastInsertRowid: 7n,
           };
         },
-        [Symbol.dispose]() {
+        close() {
           events.push("dispose");
           if (failAt === "dispose") throw disposalError;
         },
@@ -116,19 +124,17 @@ Deno.test("SQLite execution keeps failures, disposal and conversion order", asyn
   };
   const { configureStatementCache } = await import(
     pathToFileURL(
-      join(output, "execution-bonakodosqlite-false/wasm/runtime_sqlite.ts"),
+      join(output, "execution-nodesqlite-false/wasm/runtime_sqlite.ts"),
     ).href
   );
   configureStatementCache(database, 0);
-  for (
-    const [name, operation] of [
-      ["readValue", "get"],
-      ["readValues", "all"],
-      ["writeValue", "run"],
-      ["writeCount", "run"],
-      ["writeResult", "run"],
-    ]
-  ) {
+  for (const [name, operation] of [
+    ["readValue", "get"],
+    ["readValues", "all"],
+    ["writeValue", "run"],
+    ["writeCount", "run"],
+    ["writeResult", "run"],
+  ]) {
     const query = queries[name!]!;
     const args = { id: 1n, value: 1n };
     events.length = 0;
@@ -138,15 +144,13 @@ Deno.test("SQLite execution keeps failures, disposal and conversion order", asyn
     if (name === "writeCount" || name === "writeResult") {
       assert(events.indexOf("changes") < events.indexOf("dispose"));
     }
-    for (
-      const point of [
-        "prepare",
-        "safe",
-        ...(operation === "run" ? [] : ["raw"]),
-        operation!,
-        "dispose",
-      ]
-    ) {
+    for (const point of [
+      "prepare",
+      "safe",
+      ...(operation === "run" ? [] : ["raw"]),
+      operation!,
+      "dispose",
+    ]) {
       failAt = point;
       events.length = 0;
       assert.throws(
@@ -169,43 +173,47 @@ Deno.test("SQLite execution keeps failures, disposal and conversion order", asyn
   }
 });
 
-Deno.test("execution helpers preserve missing rows and server cardinality", async (t) => {
-  for (
-    const driver of [
-      "@bonakodo/sqlite",
-      "better-sqlite3",
-      "pg",
-      "postgres",
-      "mysql2",
-    ]
-  ) {
+test("execution helpers preserve missing rows and server cardinality", async (t) => {
+  for (const driver of [
+    "node:sqlite",
+    "better-sqlite3",
+    "pg",
+    "postgres",
+    "mysql2",
+  ]) {
     for (const undefinedNull of [false, true]) {
-      await t.step(`${driver} undefined=${undefinedNull}`, async () => {
+      await t.test(`${driver} undefined=${undefinedNull}`, async () => {
         const queries = await fixture(driver, undefinedNull);
         let rows: unknown[][] = [];
-        const sqlite = driver === "@bonakodo/sqlite" ||
-          driver === "better-sqlite3";
+        const sqlite = driver === "node:sqlite" || driver === "better-sqlite3";
         const database = sqlite
           ? {
-            prepare() {
-              return {
-                safeIntegers() {
-                  return this;
-                },
-                raw() {
-                  return this;
-                },
-                get: () => rows[0],
-                all: () => rows,
-                [Symbol.dispose]() {},
-              };
-            },
-          }
+              isOpen: true,
+              prepare() {
+                return {
+                  setReadBigInts() {
+                    return this.safeIntegers();
+                  },
+                  setReturnArrays() {
+                    return this.raw();
+                  },
+                  safeIntegers() {
+                    return this;
+                  },
+                  raw() {
+                    return this;
+                  },
+                  get: () => rows[0],
+                  all: () => rows,
+                  close() {},
+                };
+              },
+            }
           : driver === "pg"
-          ? { query: () => Promise.resolve({ rows }) }
-          : driver === "postgres"
-          ? { unsafe: () => ({ values: () => Promise.resolve(rows) }) }
-          : { execute: () => Promise.resolve([rows, []]) };
+            ? { query: () => Promise.resolve({ rows }) }
+            : driver === "postgres"
+              ? { unsafe: () => ({ values: () => Promise.resolve(rows) }) }
+              : { execute: () => Promise.resolve([rows, []]) };
         const args = { id: sqlite ? 1n : 1 };
         assert.equal(
           await queries.readValue!(database, args),
@@ -226,61 +234,64 @@ Deno.test("execution helpers preserve missing rows and server cardinality", asyn
   }
 });
 
-Deno.test("SQLite write result readers keep values, field errors, and cleanup precedence", async (t) => {
-  for (const driver of ["@bonakodo/sqlite", "better-sqlite3"]) {
-    for (const native of [true, false]) {
-      await t.step(`${driver} ${native ? "native" : "compat"}`, async () => {
-        const queries = await fixture(driver, false, native);
-        const directory = join(
-          output,
-          `execution-${driver.replaceAll(/\W/g, "")}-false${
-            native ? "" : "-compat"
-          }`,
-          "wasm",
-        );
-        const { QueryCodecError } = await import(
-          pathToFileURL(join(directory, "codec_error.ts")).href
-        );
-        const runtime = await import(
-          pathToFileURL(join(directory, "runtime_sqlite.ts")).href
-        );
-        const secret = new Error("supplied or stored private value");
-        const cleanup = new Error("cleanup failed");
-        let fail = "";
-        let changes: unknown = 2;
-        let last: unknown = 7n;
-        let disposed = 0;
-        const database = {
-          prepare() {
-            return {
-              safeIntegers() {
-                return this;
-              },
-              run() {
-                if (fail === "run") throw secret;
-                return {
-                  get changes() {
-                    if (fail === "changes" || fail === "both") throw secret;
-                    return changes;
-                  },
-                  get lastInsertRowid() {
-                    if (fail === "last") throw secret;
-                    return last;
-                  },
-                };
-              },
-              [Symbol.dispose]() {
-                disposed++;
-                if (fail === "dispose" || fail === "both") throw cleanup;
-              },
-            };
-          },
-        };
-        if (driver === "@bonakodo/sqlite") {
-          runtime.configureStatementCache(database, 0);
-        }
-        const args = { value: native ? 1n : 1 };
-        const checkError = (
+test("SQLite write result readers keep values, field errors, and cleanup precedence", async (t) => {
+  for (const driver of ["node:sqlite", "better-sqlite3"]) {
+    await t.test(driver, async () => {
+      const queries = await fixture(driver);
+      const directory = join(
+        output,
+        `execution-${driver.replaceAll(/\W/g, "")}-false`,
+        "wasm",
+      );
+      const { QueryCodecError } = await import(
+        pathToFileURL(join(directory, "codec_error.ts")).href
+      );
+      const runtime = await import(
+        pathToFileURL(join(directory, "runtime_sqlite.ts")).href
+      );
+      const secret = new Error("supplied or stored private value");
+      const cleanup = new Error("cleanup failed");
+      let fail = "";
+      let changes: unknown = 2;
+      let last: unknown = 7n;
+      let disposed = 0;
+      const database = {
+        isOpen: true,
+        prepare() {
+          return {
+            setReadBigInts() {
+              return this.safeIntegers();
+            },
+            setReturnArrays() {},
+            safeIntegers() {
+              return this;
+            },
+            run() {
+              if (fail === "run") throw secret;
+              return {
+                get changes() {
+                  if (fail === "changes" || fail === "both") throw secret;
+                  return changes;
+                },
+                get lastInsertRowid() {
+                  if (fail === "last") throw secret;
+                  return last;
+                },
+              };
+            },
+            close() {
+              disposed++;
+              if (fail === "dispose" || fail === "both") throw cleanup;
+            },
+          };
+        },
+      };
+      if (driver === "node:sqlite") {
+        runtime.configureStatementCache(database, 0);
+      }
+      const args = { value: 1n };
+      const checkError =
+        (
           query: string,
           field: string,
           expectedType: string,
@@ -308,77 +319,63 @@ Deno.test("SQLite write result readers keep values, field errors, and cleanup pr
           assert(!String(details).includes(secret.message));
           return true;
         };
-        const firstCount = queries.writeCount!(database, args);
-        assert.equal(
-          firstCount instanceof Promise,
-          driver === "better-sqlite3" && !native,
-        );
-        assert.equal(await firstCount, 2n);
-        assert.deepEqual(await queries.writeResult!(database, args), {
-          rowsAffected: 2n,
-          lastInsertId: 7n,
-        });
-        const idType = driver === "@bonakodo/sqlite" && !native
-          ? "number"
-          : "bigint";
-        assert.equal(
-          await queries.writeID!(database, args),
-          idType === "number" ? 7 : 7n,
-        );
-        for (
-          const [name, query, field, type, point] of [
-            ["writeCount", "WriteCount", "rowsAffected", "bigint", "changes"],
-            ["writeID", "WriteID", "lastInsertId", idType, "last"],
-            ["writeResult", "WriteResult", "rowsAffected", "bigint", "changes"],
-            ["writeResult", "WriteResult", "lastInsertId", "bigint", "last"],
-          ]
-        ) {
-          fail = point!;
-          const before = disposed;
-          await assert.rejects(
-            async () => await queries[name!]!(database, args),
-            checkError(query!, field!, type!, secret),
-          );
-          assert.equal(
-            disposed - before,
-            driver === "@bonakodo/sqlite" ? 1 : 0,
-          );
-        }
-        fail = "";
-        changes = 1.5;
+      const firstCount = queries.writeCount!(database, args);
+      assert.equal(firstCount instanceof Promise, false);
+      assert.equal(await firstCount, 2n);
+      assert.deepEqual(await queries.writeResult!(database, args), {
+        rowsAffected: 2n,
+        lastInsertId: 7n,
+      });
+      const idType = "bigint";
+      assert.equal(await queries.writeID!(database, args), 7n);
+      for (const [name, query, field, type, point] of [
+        ["writeCount", "WriteCount", "rowsAffected", "bigint", "changes"],
+        ["writeID", "WriteID", "lastInsertId", idType, "last"],
+        ["writeResult", "WriteResult", "rowsAffected", "bigint", "changes"],
+        ["writeResult", "WriteResult", "lastInsertId", "bigint", "last"],
+      ]) {
+        fail = point!;
+        const before = disposed;
         await assert.rejects(
-          async () => await queries.writeCount!(database, args),
-          checkError("WriteCount", "rowsAffected", "bigint", undefined),
+          async () => await queries[name!]!(database, args),
+          checkError(query!, field!, type!, secret),
         );
-        changes = 2;
-        last = {
-          [Symbol.toPrimitive]() {
-            throw secret;
-          },
-        };
-        await assert.rejects(
-          async () => await queries.writeID!(database, args),
-          checkError("WriteID", "lastInsertId", idType, secret),
-        );
-        last = 7n;
-        fail = "run";
+        assert.equal(disposed - before, driver === "node:sqlite" ? 1 : 0);
+      }
+      fail = "";
+      changes = 1.5;
+      await assert.rejects(
+        async () => await queries.writeCount!(database, args),
+        checkError("WriteCount", "rowsAffected", "bigint", undefined),
+      );
+      changes = 2;
+      last = {
+        [Symbol.toPrimitive]() {
+          throw secret;
+        },
+      };
+      await assert.rejects(
+        async () => await queries.writeID!(database, args),
+        checkError("WriteID", "lastInsertId", idType, secret),
+      );
+      last = 7n;
+      fail = "run";
+      await assert.rejects(
+        async () => await queries.writeResult!(database, args),
+        (error) => error === secret,
+      );
+      if (driver === "node:sqlite") {
+        fail = "both";
         await assert.rejects(
           async () => await queries.writeResult!(database, args),
-          (error) => error === secret,
+          (error) => error === cleanup,
         );
-        if (driver === "@bonakodo/sqlite") {
-          fail = "both";
-          await assert.rejects(
-            async () => await queries.writeResult!(database, args),
-            (error) => error === cleanup,
-          );
-        }
-        fail = "";
-        assert.deepEqual(await queries.writeResult!(database, args), {
-          rowsAffected: 2n,
-          lastInsertId: 7n,
-        });
+      }
+      fail = "";
+      assert.deepEqual(await queries.writeResult!(database, args), {
+        rowsAffected: 2n,
+        lastInsertId: 7n,
       });
-    }
+    });
   }
 });

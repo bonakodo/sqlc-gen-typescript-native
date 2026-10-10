@@ -1,9 +1,12 @@
+import { test } from "node:test";
+import { readFile, writeFile, rm, mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
 import { command, type Pair, wabt } from "./test_helpers.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 
-Deno.test("WAT text", async () => {
+test("WAT text", async () => {
   interface Exports {
     memory: WebAssembly.Memory;
     access: (
@@ -49,7 +52,7 @@ Deno.test("WAT text", async () => {
   }
   // Exact byte comparisons against the prior generator's frozen reference.
   // Fixtures retain invalid UTF-8 bytes.
-  const directory = await Deno.makeTempDir({ prefix: "sqlc-wat-text-" });
+  const directory = await mkdtemp(join(tmpdir(), "sqlc-wat-text-"));
   const names = [
     "quote",
     "template",
@@ -86,26 +89,29 @@ Deno.test("WAT text", async () => {
   ];
   let api: Exports;
   try {
-    const source = (await Promise.all(
-      ["core", "unicode", "inflection-data", "text"].map((n) =>
-        Deno.readTextFile(new URL(`../../src/${n}.wat`, import.meta.url))
-      ),
-    )).join("\n");
-    const exports = [...names, ...helperNames].filter((n) =>
-      source.includes(`(func $${n} `)
-    ).map((n) => `(export "${n}" (func $${n}))`).join("\n");
-    await Deno.writeTextFile(
+    const source = (
+      await Promise.all(
+        ["core", "unicode", "inflection-data", "text"].map((n) =>
+          readFile(new URL(`../../src/${n}.wat`, import.meta.url), "utf8"),
+        ),
+      )
+    ).join("\n");
+    const exports = [...names, ...helperNames]
+      .filter((n) => source.includes(`(func $${n} `))
+      .map((n) => `(export "${n}" (func $${n}))`)
+      .join("\n");
+    await writeFile(
       join(directory, "text.wat"),
       `(module\n${source}\n${exports}\n)`,
     );
-    const compile = await command(wabt("wat2wasm"), [
-      join(directory, "text.wat"),
-      "-o",
-      join(directory, "text.wasm"),
-    ], { encoding: "utf8" });
+    const compile = await command(
+      wabt("wat2wasm"),
+      [join(directory, "text.wat"), "-o", join(directory, "text.wasm")],
+      { encoding: "utf8" },
+    );
     assert.equal(compile.status, 0, compile.stderr);
     const { instance } = await WebAssembly.instantiate(
-      await Deno.readFile(join(directory, "text.wasm")),
+      await readFile(join(directory, "text.wasm")),
       {
         wasi_snapshot_preview1: {
           fd_read: () => 0,
@@ -118,7 +124,7 @@ Deno.test("WAT text", async () => {
     );
     api = instance.exports as unknown as Exports;
   } finally {
-    await Deno.remove(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
   const memory = Buffer.from(api.memory.buffer);
   const ptr = 33554432;
@@ -128,8 +134,9 @@ Deno.test("WAT text", async () => {
   memory.write("row", object);
   const take = ([p, n]: Pair) => Buffer.from(memory.subarray(p, p + n));
   const source = JSON.parse(
-    await Deno.readTextFile(
+    await readFile(
       new URL("./fixtures/text-oracle.json", import.meta.url),
+      "utf8",
     ),
   );
   for (const [index, item] of source.cases.entries()) {
@@ -143,13 +150,14 @@ Deno.test("WAT text", async () => {
         memory.writeUInt32LE(ptr, 30000);
         memory.writeUInt32LE(input.length, 30004);
       }
-      const args = name === "comment"
-        ? [30000, 1]
-        : name === "access"
-        ? [object, 3, ptr, input.length]
-        : name === "field_name"
-        ? [ptr, input.length, fallback, 8]
-        : [ptr, input.length];
+      const args =
+        name === "comment"
+          ? [30000, 1]
+          : name === "access"
+            ? [object, 3, ptr, input.length]
+            : name === "field_name"
+              ? [ptr, input.length, fallback, 8]
+              : [ptr, input.length];
       const result = take((api[name] as (...args: number[]) => Pair)(...args));
       assert.deepEqual(
         result,
@@ -165,16 +173,14 @@ Deno.test("WAT text", async () => {
   }
   api.text_reset(20971520);
   const scope = api.name_scope();
-  for (
-    const [base, want] of [
-      ["class", "class_2"],
-      ["class", "class_3"],
-      ["Class", "Class"],
-      ["Database", "Database_2"],
-      ["GetUser", "GetUser"],
-      ["GetUser", "GetUser_2"],
-    ] as const
-  ) {
+  for (const [base, want] of [
+    ["class", "class_2"],
+    ["class", "class_3"],
+    ["Class", "Class"],
+    ["Database", "Database_2"],
+    ["GetUser", "GetUser"],
+    ["GetUser", "GetUser_2"],
+  ] as const) {
     memory.write(base, ptr);
     // Names refer to stable source bytes, just as the generator's compact input
     // and saved text do. Copy the changing test input before retaining its name.
@@ -187,15 +193,13 @@ Deno.test("WAT text", async () => {
     take(api.name_take(raw, ...api.text_copy(ptr, 5))).toString(),
     "class",
   );
-  for (
-    const value of [
-      0n,
-      1n,
-      -1n,
-      9223372036854775807n,
-      -9223372036854775808n,
-    ] as const
-  ) {
+  for (const value of [
+    0n,
+    1n,
+    -1n,
+    9223372036854775807n,
+    -9223372036854775808n,
+  ] as const) {
     assert.equal(take(api.decimal(value)).toString(), String(value));
   }
   assert.equal(api.compare(ptr, 0, ptr, 0), 0);
@@ -205,47 +209,45 @@ Deno.test("WAT text", async () => {
     } string functions; identifiers, scopes, and signed decimals passed`,
   );
 
-  for (
-    const [r, want] of [
-      [0, "'\\x00'"],
-      [7, "'\\a'"],
-      [39, "'\\''"],
-      [92, "'\\\\'"],
-      [10, "'\\n'"],
-      [128, "'\\u0080'"],
-      [160, "'\\u00a0'"],
-      [128512, "'😀'"],
-      [-1, "'�'"],
-    ] as const
-  ) assert.equal(take(api.go_quote_rune(r)).toString(), want);
-  for (
-    const [s, want] of [["Name", 3], ["A | B", 1], ["() => string", 0], [
-      "A extends B ? C : D",
-      0,
-    ], ["name[]", 3]] as const
-  ) {
+  for (const [r, want] of [
+    [0, "'\\x00'"],
+    [7, "'\\a'"],
+    [39, "'\\''"],
+    [92, "'\\\\'"],
+    [10, "'\\n'"],
+    [128, "'\\u0080'"],
+    [160, "'\\u00a0'"],
+    [128512, "'😀'"],
+    [-1, "'�'"],
+  ] as const)
+    assert.equal(take(api.go_quote_rune(r)).toString(), want);
+  for (const [s, want] of [
+    ["Name", 3],
+    ["A | B", 1],
+    ["() => string", 0],
+    ["A extends B ? C : D", 0],
+    ["name[]", 3],
+  ] as const) {
     memory.write(s, ptr);
     assert.equal(api.type_precedence(ptr, Buffer.byteLength(s)), want, s);
   }
   assert.equal(take(api.comment(30000, 0)).length, 0);
 
-  for (
-    const [a, b, want] of [
-      ["σ", "ς", 1],
-      ["Σ", "ς", 1],
-      ["ſ", "S", 1],
-      ["K", "k", 1],
-      ["µ", "Μ", 1],
-      ["Å", "Å", 1],
-      ["İ", "i", 0],
-      ["ı", "I", 0],
-      ["ß", "SS", 0],
-      ["ẞ", "ß", 1],
-      ["日本語", "日本語", 1],
-      ["a", "ab", 0],
-      ["", "", 1],
-    ] as const
-  ) {
+  for (const [a, b, want] of [
+    ["σ", "ς", 1],
+    ["Σ", "ς", 1],
+    ["ſ", "S", 1],
+    ["K", "k", 1],
+    ["µ", "Μ", 1],
+    ["Å", "Å", 1],
+    ["İ", "i", 0],
+    ["ı", "I", 0],
+    ["ß", "SS", 0],
+    ["ẞ", "ß", 1],
+    ["日本語", "日本語", 1],
+    ["a", "ab", 0],
+    ["", "", 1],
+  ] as const) {
     memory.write(a, ptr);
     memory.write(b, ptr + 100);
     assert.equal(
