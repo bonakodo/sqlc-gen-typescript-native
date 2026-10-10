@@ -1,8 +1,8 @@
 # Generated-code and SQLite measurements, 2026-09-09
 
-> Historical record: Deno output and `@bonakodo/sqlite` support have since
-> been removed. The driver-specific benchmark tool and tests shown here no
-> longer ship. See the [README](../README.md) for current support.
+> Historical results for the retired `@bonakodo/sqlite` driver. These timings
+> and memory figures do not measure the current Node and Bun SQLite drivers.
+> See the [README](../README.md) for current support.
 
 These measurements use the repository's starting commit `c26dd3b` as the
 comparison baseline. That commit already shares execution helpers, passes
@@ -20,9 +20,9 @@ present in `c26dd3b` are not new gains from the statement cache.
   SvelteKit 3.0.0-next.12, esbuild 0.28.1.
 - Separate detached generator and application worktrees. The application
   checkout stayed unchanged. Each comparison changed only the isolated sqlc
-  plugin URL and checksum, then ran `deno task db:generate` and
-  `deno task build`. The build used a temporary SQLite path, not application
-  data. No generated application files were edited by hand.
+  plugin URL and checksum, then ran the application's generation and build
+  tasks. The build used a temporary SQLite path, not application data.
+  No generated application files were edited by hand.
 - Vite's `generateBundle` hook recorded each JavaScript chunk's byte length and
   each module's `renderedLength`. Generated-module attribution and bundled
   dependencies are reported separately. Attribution is the bundler's measure of
@@ -35,26 +35,21 @@ present in `c26dd3b` are not new gains from the statement cache.
   Generated SQL, input data, driver/runtime versions, and preparation policies
   stay the same between comparisons.
 
-## Reproduction tools
+## Source measurement and historical benchmark method
 
 `tools/measure-generated.ts` counts TypeScript bytes, SQL literal source bytes,
 query declarations, and the old repeated execution patterns. It optionally reads
 the Vite attribution JSON described above.
 
 ```sh
-deno run --allow-read tools/measure-generated.ts GENERATED_DIR [BUNDLE_JSON]
+node tools/measure-generated.ts GENERATED_DIR [BUNDLE_JSON]
 ```
 
-`tools/measure-sqlite.ts` generates its own fixed workload using stock sqlc. Run
-each artifact in a separate directory, then measure each capacity in a separate
-Deno process. The starting artifact supports capacity zero only.
-
-```sh
-export SQLC="$PWD/bin/.tools/sqlc-1.31.1/sqlc"
-export DENO_SQLITE_PATH=/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib
-deno run -A tools/measure-sqlite.ts generate bin/sqlc-gen-typescript-native.wasm /tmp/sqlc-measure
-deno run -A --config tests/integration/deno.json tools/measure-sqlite.ts run /tmp/sqlc-measure/generated 16 30000
-```
+The retired SQLite benchmark tool and its setup instructions remain in
+[commit `26c0514`](https://github.com/bonakodo/sqlc-gen-typescript-native/blob/26c0514/docs/measurements-2026-09-09.md).
+That tool generated a fixed workload using stock sqlc and measured each artifact
+and capacity in a separate process. The starting artifact supported capacity
+zero only.
 
 The benchmark uses 256 rows in an in-memory database. It reports five timing
 samples after warmup, reads returned results into a checksum, and measures
@@ -74,13 +69,9 @@ growth, not each statement's independent size. Public `prepare` and
 `Symbol.dispose` instrumentation counts retained handles without accessing
 driver internals.
 
-Pass a workload name to isolate its process memory. Exposing V8's collection
-function adds snapshots after two explicit collections; timed loops still run
+Separate workload runs isolated process memory. Exposing V8's collection
+function added snapshots after two explicit collections; timed loops ran
 without forced collection or prepare/dispose instrumentation.
-
-```sh
-deno run --v8-flags=--expose-gc -A --config tests/integration/deno.json tools/measure-sqlite.ts run /tmp/sqlc-measure/generated 16 30000 churn128
-```
 
 For Vite attribution, add this temporary plugin to the isolated application
 config, with `writeFileSync` imported from `node:fs`. Remove it before
@@ -234,7 +225,7 @@ reduction or a strict RSS bound.
 ### Application validation
 
 The isolated application built successfully with the normal task and passed
-`deno task check` with zero errors and zero warnings. The normal unit task
+its checks with zero errors and zero warnings. The normal unit task
 passed 670 tests and 31 steps with caching and stable helpers enabled. After the
 final write-result helper change, the typed database subset passed 12 tests and
 18 steps, including preparation of all 751 application queries against its

@@ -51,9 +51,8 @@ jobs:
           process plugin, switch to the WASM configuration below. The Go library
           and process plugin are no longer included.
 
-          Generated code now supports Node and Bun. Deno output and the
-          @bonakodo/sqlite driver are no longer supported. Update those configs
-          to use Node or Bun with node:sqlite, bun:sqlite, or better-sqlite3.
+          Generated code supports Node and Bun. SQLite drivers include
+          node:sqlite, bun:sqlite, and better-sqlite3.
 
           SQLite now always uses native value types and synchronous helpers.
           Remove sqlite_type_mode from configs; integer arguments, rows, and

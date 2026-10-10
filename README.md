@@ -110,8 +110,6 @@ v1.31.1.
 `runtime` defaults to `node`; `driver` is required. Engine/driver mismatches
 fail before sqlc receives output files. Generated imports use bare package
 names, including `mysql2/promise`. Pin dependencies in `package.json`.
-Deno output and `@bonakodo/sqlite` are no longer supported. Use Node or Bun
-with a driver listed above.
 
 For `pg` and `better-sqlite3`, install their `@types` packages. Queries that use
 PostgreSQL intervals with `pg` also import the `postgres-interval` type package;
@@ -322,8 +320,9 @@ on its connections or pool (zero is **not** a disable setting). `pg` uses unname
 queries and postgres.js uses its existing `unsafe()` preparation policy. The
 generator does not name, deallocate, or replay PostgreSQL statements. Pool
 transactions still require a checked-out connection or transaction handle.
-See [driver preparation](docs/driver-preparation.md) and
-[measurements](docs/measurements-2026-09-09.md) for tested limits, versions, and tradeoffs.
+See [driver preparation](docs/driver-preparation.md) for tested limits and
+versions. The [2026-09-09 measurements](docs/measurements-2026-09-09.md) cover
+a retired driver; they do not measure the current Node and Bun SQLite drivers.
 
 Set `emit_query_factory: true` to also bind queries to a connection once:
 
