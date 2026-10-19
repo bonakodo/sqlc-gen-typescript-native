@@ -19,7 +19,7 @@
     "live": "./tools/test-server-live.sh"
   },
   "devDependencies": {
-    "@types/node": "26.4.1",
+    "@types/node": "26.6.5",
     "typescript": "6.0.3",
     "prettier": "3.9.10",
     "eslint": "10.12.0",
